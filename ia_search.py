@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Tuple
 import os
 import select
+
 try:
     import msvcrt  # type: ignore
 except Exception:
@@ -54,7 +55,7 @@ def color(text: str, code: str) -> str:
 
 
 def read_key_nonblocking() -> Optional[str]:
-    if os.name == 'nt' and msvcrt is not None:
+    if os.name == "nt" and msvcrt is not None:
         if msvcrt.kbhit():
             ch = msvcrt.getwch()
             return ch
@@ -105,6 +106,7 @@ ALLOWED_SORT = {
     "random desc",
     "random asc",
 }
+
 
 def list_sorts() -> str:
     lines = [color("Supported sort keys (curated):", Color.BOLD)]
@@ -165,7 +167,10 @@ def fetch_json(url: str, debug: bool = False) -> dict:
             js = resp.json()
         except Exception:
             if debug:
-                print(color("Response not JSON; first 500 bytes:", Color.YELLOW), file=sys.stderr)
+                print(
+                    color("Response not JSON; first 500 bytes:", Color.YELLOW),
+                    file=sys.stderr,
+                )
                 print(data[:500], file=sys.stderr)
             raise
         return js
@@ -230,9 +235,7 @@ def format_table(items: List[Item]) -> str:
 
 def prompt_index(n: int) -> Optional[int]:
     try:
-        raw = input(
-            color("Select a row number (or Enter to quit): ", Color.BOLD)
-        ).strip()
+        raw = input(color("Select a row number (or 'q' to quit): ", Color.BOLD)).strip()
     except EOFError:
         return None
     if not raw:
@@ -250,12 +253,12 @@ def prompt_index(n: int) -> Optional[int]:
 
 def parse_multi_select(raw: str, n: int) -> List[int]:
     sel: List[int] = []
-    for part in raw.split(','):
+    for part in raw.split(","):
         part = part.strip()
         if not part:
             continue
-        if '-' in part:
-            a, _, b = part.partition('-')
+        if "-" in part:
+            a, _, b = part.partition("-")
             try:
                 start = int(a)
                 end = int(b)
@@ -300,7 +303,7 @@ def build_file_url(details: dict, name: str) -> Optional[str]:
     dir_ = details.get("dir")
     if not server or not dir_:
         return None
-    name = name.lstrip('/')
+    name = name.lstrip("/")
     return f"https://{server}{dir_}/{urllib.parse.quote(name)}"
 
 
@@ -342,9 +345,7 @@ def format_item_details(
     files_obj = data.get("files", [])
     # Normalize files: API can return a dict keyed by path or a list
     if isinstance(files_obj, dict):
-        files = [
-            {"name": k.lstrip("/"), **(v or {})} for k, v in files_obj.items()
-        ]
+        files = [{"name": k.lstrip("/"), **(v or {})} for k, v in files_obj.items()]
     else:
         files = files_obj
     # Header info
@@ -438,7 +439,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="software",
         help="Restrict mediatype, e.g. software, audio, movies (default: software)",
     )
-    p.add_argument("--rows", type=int, default=50, help="Rows per page (default: 50)")
+    p.add_argument("--rows", type=int, default=10, help="Rows per page (default: 10)")
     p.add_argument("--page", type=int, default=1, help="Page number (default: 1)")
     p.add_argument(
         "--sort",
@@ -589,7 +590,10 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
 
     if not args.query:
-        print(color("Error: --query is required unless using --list-sorts", Color.YELLOW), file=sys.stderr)
+        print(
+            color("Error: --query is required unless using --list-sorts", Color.YELLOW),
+            file=sys.stderr,
+        )
         return 2
 
     # Build description terms
@@ -629,7 +633,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
             print("\n".join(numbered))
             sel = prompt_index(len(items))
-            if sel is None:
+            if sel is None or sel == "q":
                 # Quit interactive loop
                 print(table)
                 break
@@ -637,7 +641,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             try:
                 details = fetch_item_details(chosen.identifier, debug=args.verbose > 0)
             except Exception as e:
-                print(color(f"Details fetch failed: {e}", Color.YELLOW), file=sys.stderr)
+                print(
+                    color(f"Details fetch failed: {e}", Color.YELLOW), file=sys.stderr
+                )
                 print(table)
                 return 2
             if args.json:
@@ -646,75 +652,94 @@ def main(argv: Optional[List[str]] = None) -> int:
                 continue
             else:
                 # Single colorful files table only
-                print(format_item_details(details, ext_filter=args.ext, human=not args.no_human, hash_type=args.hash))
+                print(
+                    format_item_details(
+                        details,
+                        ext_filter=args.ext,
+                        human=not args.no_human,
+                        hash_type=args.hash,
+                    )
+                )
             # Enter download flow by default when interactive, unless explicitly disabled
             if args.download or (args.interactive and not args.json):
                 files_obj = details.get("files", {})
                 if isinstance(files_obj, dict):
-                    files_list = [{"name": k.lstrip('/'), **(v or {})} for k, v in files_obj.items()]
+                    files_list = [
+                        {"name": k.lstrip("/"), **(v or {})}
+                        for k, v in files_obj.items()
+                    ]
                 else:
                     files_list = files_obj or []
             # apply ext and contains filters again for selection
             if args.ext:
-                ef = args.ext.lower().lstrip('.')
-                files_list = [f for f in files_list if f.get('name','').lower().endswith('.'+ef)]
+                ef = args.ext.lower().lstrip(".")
+                files_list = [
+                    f
+                    for f in files_list
+                    if f.get("name", "").lower().endswith("." + ef)
+                ]
             if args.file_contains:
                 sub = args.file_contains.lower()
-                files_list = [f for f in files_list if sub in f.get('name','').lower()]
+                files_list = [f for f in files_list if sub in f.get("name", "").lower()]
             if not files_list:
                 print(color("No files match filters.", Color.YELLOW))
                 return 0
             # Prompt with back option
             print()
             for idx, f in enumerate(files_list, 1):
-                name = f.get('name','')
-                size = f.get('size')
-                hs = f.get(args.hash) or '-'
+                name = f.get("name", "")
+                size = f.get("size")
+                hs = f.get(args.hash) or "-"
                 try:
-                    size_s = human_size(int(size)) if size not in (None, '') else '-'
+                    size_s = human_size(int(size)) if size not in (None, "") else "-"
                 except Exception:
-                    size_s = str(size) if size is not None else '-'
-                print(f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(size_s.rjust(8), Color.GREEN)}  {color((hs if isinstance(hs,str) else str(hs))[:40].ljust(40), Color.DIM)}  {color(name, Color.BLUE)}")
+                    size_s = str(size) if size is not None else "-"
+                print(
+                    f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(size_s.rjust(8), Color.GREEN)}  {color((hs if isinstance(hs, str) else str(hs))[:40].ljust(40), Color.DIM)}  {color(name, Color.BLUE)}"
+                )
             try:
                 prompt = "Select files (e.g., 1,3,5-7), 'b' to go back, 'q' to quit: "
                 raw = input(color(prompt, Color.BOLD))
             except EOFError:
                 return 0
-            raw = (raw or '').strip()
-            if raw.lower() == 'q':
+            raw = (raw or "").strip()
+            if raw.lower() == "q":
                 # Quit interactive loop from files prompt
                 break
-            if raw.lower() == 'b':
+            if raw.lower() == "b":
                 # Go back to results list
                 continue
-            indices = parse_multi_select(raw, len(files_list))
-            if not indices:
-                print(color("No valid selections.", Color.YELLOW))
-                return 0
-            selected = [files_list[i] for i in indices]
-            # Build URLs
-            urls = []
-            torrents = []
-            for f in selected:
-                url = build_file_url(details, f.get('name',''))
-                if url:
-                    if url.lower().endswith('.torrent'):
-                        torrents.append(url)
-                    else:
-                        urls.append(url)
-            if not urls:
-                print(color("No non-torrent URLs to download.", Color.YELLOW))
-            print(color(f"Planned downloads to {args.download_dir}:", Color.BOLD))
-            for u in torrents + urls:
-                print(" - ", u)
+            # Single selection only
+            if "," in raw or "-" in raw:
+                print(color("Please select a single index only.", Color.YELLOW))
+                continue
+            try:
+                one_idx = int(raw)
+            except ValueError:
+                print(color("Invalid selection.", Color.YELLOW))
+                continue
+            if not (1 <= one_idx <= len(files_list)):
+                print(color("Selection out of range.", Color.YELLOW))
+                continue
+            sel_file = files_list[one_idx - 1]
+            url = build_file_url(details, sel_file.get("name", ""))
+            if not url:
+                print(color("Could not build file URL.", Color.YELLOW))
+                continue
+            print(color(f"Planned download to {args.download_dir}:", Color.BOLD), url)
             if args.dry_run:
                 # after dry-run, return to results
                 continue
             # Try aria2 unless disabled
             if not args.no_aria2:
-                aria2_path = args.aria2_path or shutil.which('aria2c')
+                aria2_path = args.aria2_path or shutil.which("aria2c")
                 if not aria2_path:
-                    print(color("aria2 not found or disabled. Using PySmartDL fallback.", Color.YELLOW))
+                    print(
+                        color(
+                            "aria2 not found or disabled. Using PySmartDL fallback.",
+                            Color.YELLOW,
+                        )
+                    )
                 else:
                     print(color("Found aria2", Color.GREEN))
                     cmd = [
@@ -723,36 +748,38 @@ def main(argv: Optional[List[str]] = None) -> int:
                         f"--max-connection-per-server={args.max_connections}",
                         f"--split={args.max_connections}",
                         f"--dir={args.download_dir}",
+                        "--stderr=true",
+                        url,
                     ]
-                    cmd.extend(torrents)
-                    cmd.extend(urls)
                     # Show controls hint and command if verbose
                     print(color("[x=cancel, q=quit]", Color.DIM))
                     if args.verbose:
                         print(color("Running aria2c:", Color.MAGENTA), " ".join(cmd))
-                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    proc = subprocess.Popen(
+                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                    )
                     try:
                         while True:
                             key = read_key_nonblocking()
                             if key:
                                 k = key.lower()
-                                if k == 'x':
+                                if k == "x":
                                     proc.terminate()
                                     print()
                                     print(color("Downloads canceled.", Color.YELLOW))
                                     break
-                                if k == 'q':
+                                if k == "q":
                                     proc.terminate()
                                     print()
                                     print(color("Quitting.", Color.YELLOW))
                                     raise SystemExit(0)
-                            line = proc.stdout.readline() if proc.stdout else ''
+                            line = proc.stdout.readline() if proc.stdout else ""
                             if not line:
                                 if proc.poll() is not None:
                                     break
                                 time.sleep(0.1)
                                 continue
-                            print(line, end='')
+                            print(line, end="")
                         # After completion, return to results list
                         continue
                     finally:
@@ -762,42 +789,50 @@ def main(argv: Optional[List[str]] = None) -> int:
                             pass
             # Fallback: PySmartDL
             if args.no_aria2:
-                print(color("aria2 not found or disabled. Using PySmartDL fallback.", Color.YELLOW))
+                print(
+                    color(
+                        "aria2 not found or disabled. Using PySmartDL fallback.",
+                        Color.YELLOW,
+                    )
+                )
             print(color("[x=cancel, q=quit]", Color.DIM))
             try:
                 from pySmartDL import SmartDL  # type: ignore
             except Exception:
-                print(color("PySmartDL not installed; please install or use aria2.", Color.YELLOW))
+                print(
+                    color(
+                        "PySmartDL not installed; please install or use aria2.",
+                        Color.YELLOW,
+                    )
+                )
                 # back to results
                 continue
-            if torrents:
-                print(color("Torrent downloads require aria2; skipping torrents in fallback.", Color.YELLOW))
-            for u in urls:
-                print(color(f"Downloading: {u}", Color.MAGENTA))
-                obj = SmartDL(u, dest=args.download_dir)
-                obj.start(blocking=False)
-                # Poll with key handling
-                while not obj.isFinished():
-                    key = read_key_nonblocking()
-                    if key:
-                        k = key.lower()
-                        if k == 'x':
-                            obj.stop()
-                            print()
-                            print(color("Download canceled.", Color.YELLOW))
-                            break
-                        if k == 'q':
-                            obj.stop()
-                            print()
-                            print(color("Quitting.", Color.YELLOW))
-                            raise SystemExit(0)
-                    time.sleep(0.2)
-                if obj.isSuccessful():
-                    print(color(f"Done: {u}", Color.GREEN))
-                elif obj.get_errors():
-                    print(color(f"Failed: {u}", Color.YELLOW))
-            # After fallback downloads, continue to results list
-            continue
+            # PySmartDL single file
+            print(color(f"Downloading: {url}", Color.MAGENTA))
+            obj = SmartDL(url, dest=args.download_dir)
+            obj.start(blocking=False)
+            # Poll with key handling
+            while not obj.isFinished():
+                key = read_key_nonblocking()
+                if key:
+                    k = key.lower()
+                    if k == "x":
+                        obj.stop()
+                        print()
+                        print(color("Download canceled.", Color.YELLOW))
+                        break
+                    if k == "q":
+                        obj.stop()
+                        print()
+                        print(color("Quitting.", Color.YELLOW))
+                        raise SystemExit(0)
+                time.sleep(0.2)
+            if obj.isSuccessful():
+                print(color("Done", Color.GREEN))
+            elif obj.get_errors():
+                print(color("Failed", Color.YELLOW))
+                # After fallback downloads, continue to results list
+                continue
     else:
         print(table)
         return 0
