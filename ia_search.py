@@ -378,7 +378,9 @@ def format_item_details(
         files = [f for f in files if f.get("name", "").lower().endswith("." + ef)]
 
     idx_w = 3
-    name_w = max(10, *(len(f.get("name", "")) for f in files)) if files else 10
+    # Wrap filenames to a fixed width so long names don't break layout
+    wrap_w = 50
+    name_w = wrap_w
     size_w = 12
     hash_label = hash_type.upper()
     hash_w = max(8, len(hash_label), 40)
@@ -413,11 +415,21 @@ def format_item_details(
             hash_s = sha256 or "-"
         else:  # default sha1
             hash_s = sha1 or "-"
+        # Wrap the filename into chunks of wrap_w, only the first line is numbered
+        chunks = [name[x:x+wrap_w] for x in range(0, len(name), wrap_w)] or [""]
         idxc = color(str(i).rjust(idx_w), Color.MAGENTA)
-        namec = color(name.ljust(name_w), Color.BLUE)
         sizec = color(size_s.rjust(size_w), Color.GREEN)
         hashc = color(str(hash_s)[:hash_w].ljust(hash_w), Color.DIM)
-        lines.append(f"{idxc}  {namec}  {sizec}  {hashc}")
+        for j, chunk in enumerate(chunks):
+            namec = color(chunk.ljust(name_w), Color.BLUE)
+            if j == 0:
+                lines.append(f"{idxc}  {namec}  {sizec}  {hashc}")
+            else:
+                # continuation lines: spaces for index/size/hash to keep alignment
+                blank_idx = ' ' * idx_w
+                blank_size = ' ' * size_w
+                blank_hash = ' ' * hash_w
+                lines.append(f"{blank_idx}  {namec}  {blank_size}  {blank_hash}")
     return "\n".join(lines)
 
 
