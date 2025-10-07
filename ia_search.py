@@ -356,6 +356,7 @@ def format_item_details(
     total_size = item_info.get("item_size")
     files_count = item_info.get("files_count")
     lines = []
+    lines.append("\n")
     lines.append(color(str(title), Color.BOLD))
     lines.append(f"Creator: {creator}")
     lines.append(f"Date: {date}")
@@ -366,7 +367,6 @@ def format_item_details(
             lines.append(f"Total Size: {total_size}")
     if files_count is not None:
         lines.append(f"Files: {files_count}")
-    lines.append("")
     # Files table
     if not files:
         lines.append(color("No file list available.", Color.YELLOW))
@@ -632,6 +632,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         while True:
             # show results with numbers
             numbered = []
+            numbered.append("\n")
             for idx, it in enumerate(items, 1):
                 numbered.append(
                     f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(it.identifier, Color.BLUE)}  {color((it.title or ''), Color.DIM)}"
@@ -656,169 +657,143 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # when viewing raw json, go back to results loop
                 continue
             else:
-                # Print only the single colorful files table (no duplicate/plain table)
-                print(
-                    format_item_details(
-                        details,
-                        ext_filter=args.ext,
-                        human=not args.no_human,
-                        hash_type=args.hash,
-                    )
-                )
-            # Enter download flow by default when interactive, unless explicitly disabled
-            if args.download or (args.interactive and not args.json):
-                files_obj = details.get("files", {})
-                if isinstance(files_obj, dict):
-                    files_list = [
-                        {"name": k.lstrip("/"), **(v or {})}
-                        for k, v in files_obj.items()
-                    ]
-                else:
-                    files_list = files_obj or []
-            # apply ext and contains filters again for selection
-            if args.ext:
-                ef = args.ext.lower().lstrip(".")
-                files_list = [
-                    f
-                    for f in files_list
-                    if f.get("name", "").lower().endswith("." + ef)
-                ]
-            if args.file_contains:
-                sub = args.file_contains.lower()
-                files_list = [f for f in files_list if sub in f.get("name", "").lower()]
-            if not files_list:
-                print(color("No files match filters.", Color.YELLOW))
-                return 0
-            # We already printed the indexed colorful table above; no second list
-            try:
-                # Single-file selection only
-                prompt = "Select a file (index), 'b' to go back, 'q' to quit: "
-                raw = input(color(prompt, Color.BOLD))
-            except EOFError:
-                return 0
-            raw = (raw or "").strip()
-            if raw.lower() == "q":
-                # Quit interactive loop from files prompt
-                break
-            if raw.lower() == "b":
-                # Go back to results list
-                continue
-            # Single selection only
-            if "," in raw or "-" in raw:
-                print(color("Please select a single index only.", Color.YELLOW))
-                continue
-            try:
-                one_idx = int(raw)
-            except ValueError:
-                print(color("Invalid selection.", Color.YELLOW))
-                continue
-            if not (1 <= one_idx <= len(files_list)):
-                print(color("Selection out of range.", Color.YELLOW))
-                continue
-            sel_file = files_list[one_idx - 1]
-            url = build_file_url(details, sel_file.get("name", ""))
-            if not url:
-                print(color("Could not build file URL.", Color.YELLOW))
-                continue
-            print(color(f"Planned download to {args.download_dir}:", Color.BOLD), url)
-            if args.dry_run:
-                # after dry-run, return to results
-                continue
-            # Try aria2 unless disabled
-            if not args.no_aria2:
-                aria2_path = args.aria2_path or shutil.which("aria2c")
-                if not aria2_path:
+                # Item-scoped interactive files loop
+                while True:
+                    # Print only the single colorful files table
                     print(
-                        color(
-                            "aria2 not found or disabled. Using PySmartDL fallback.",
-                            Color.YELLOW,
+                        format_item_details(
+                            details,
+                            ext_filter=args.ext,
+                            human=not args.no_human,
+                            hash_type=args.hash,
                         )
                     )
-                else:
-                    print(color("Found aria2", Color.GREEN))
-                    cmd = [
-                        aria2_path,
-                        "--continue=true",
-                        f"--max-connection-per-server={args.max_connections}",
-                        f"--split={args.max_connections}",
-                        f"--dir={args.download_dir}",
-                        url,
-                    ]
-                    # Show controls hint and command if verbose
-                    print(color("[x=cancel, q=quit]", Color.DIM))
-                    if args.verbose:
-                        print(color("Running aria2c:", Color.MAGENTA), " ".join(cmd))
-                    # Option 1: let aria2 write directly to terminal (inherits stdout/stderr)
-                    proc = subprocess.Popen(cmd)
-                    try:
-                        while proc.poll() is None:
-                            key = read_key_nonblocking()
-                            if key:
-                                k = key.lower()
-                                if k == "x":
-                                    proc.terminate()
-                                    print()
-                                    print(color("Download canceled.", Color.YELLOW))
-                                    break
-                                if k == "q":
-                                    proc.terminate()
-                                    print()
-                                    print(color("Quitting.", Color.YELLOW))
-                                    raise SystemExit(0)
-                            time.sleep(0.1)
-                        # After completion, return to results list
-                        continue
-                    finally:
-                        try:
-                            proc.terminate()
-                        except Exception:
-                            pass
-            # Fallback: PySmartDL
-            if args.no_aria2:
-                print(
-                    color(
-                        "aria2 not found or disabled. Using PySmartDL fallback.",
-                        Color.YELLOW,
-                    )
-                )
-            print(color("[x=cancel, q=quit]", Color.DIM))
-            try:
-                from pySmartDL import SmartDL  # type: ignore
-            except Exception:
-                print(
-                    color(
-                        "PySmartDL not installed; please install or use aria2.",
-                        Color.YELLOW,
-                    )
-                )
-                # back to results
-                continue
-            # PySmartDL single file
-            print(color(f"Downloading: {url}", Color.MAGENTA))
-            obj = SmartDL(url, dest=args.download_dir)
-            obj.start(blocking=False)
-            # Poll with key handling
-            while not obj.isFinished():
-                key = read_key_nonblocking()
-                if key:
-                    k = key.lower()
-                    if k == "x":
-                        obj.stop()
-                        print()
-                        print(color("Download canceled.", Color.YELLOW))
+                    # Build file list for selection
+                    files_obj = details.get("files", {})
+                    if isinstance(files_obj, dict):
+                        files_list = [
+                            {"name": k.lstrip("/"), **(v or {})}
+                            for k, v in files_obj.items()
+                        ]
+                    else:
+                        files_list = files_obj or []
+                    # apply ext and contains filters again for selection
+                    if args.ext:
+                        ef = args.ext.lower().lstrip(".")
+                        files_list = [
+                            f
+                            for f in files_list
+                            if f.get("name", "").lower().endswith("." + ef)
+                        ]
+                    if args.file_contains:
+                        sub = args.file_contains.lower()
+                        files_list = [
+                            f for f in files_list if sub in f.get("name", "").lower()
+                        ]
+                    if not files_list:
+                        print(color("No files match filters.", Color.YELLOW))
                         break
-                    if k == "q":
-                        obj.stop()
-                        print()
-                        print(color("Quitting.", Color.YELLOW))
-                        raise SystemExit(0)
-                time.sleep(0.2)
-            if obj.isSuccessful():
-                print(color("Done", Color.GREEN))
-            elif obj.get_errors():
-                print(color("Failed", Color.YELLOW))
-                # After fallback downloads, continue to results list
-                continue
+                    try:
+                        # Single-file selection only
+                        prompt = "Select a file (index), 'b' to go back, 'q' to quit: "
+                        sys.stdout.flush()
+                        raw = input(color(prompt, Color.BOLD))
+                    except EOFError:
+                        return 0
+                    raw = (raw or "").strip()
+                    if raw.lower() == "q":
+                        # Quit entirely
+                        return 0
+                    if raw.lower() == "b":
+                        # Back to results list
+                        break
+                    # Single selection only
+                    if "," in raw or "-" in raw:
+                        print(color("Please select a single index only.", Color.YELLOW))
+                        continue
+                    try:
+                        one_idx = int(raw)
+                    except ValueError:
+                        print(color("Invalid selection.", Color.YELLOW))
+                        continue
+                    if not (1 <= one_idx <= len(files_list)):
+                        print(color("Selection out of range.", Color.YELLOW))
+                        continue
+                    sel_file = files_list[one_idx - 1]
+                    url = build_file_url(details, sel_file.get("name", ""))
+                    if not url:
+                        print(color("Could not build file URL.", Color.YELLOW))
+                        continue
+                    print(
+                        color(f"Planned download to {args.download_dir}:", Color.BOLD),
+                        url,
+                    )
+                    if args.dry_run:
+                        # after dry-run, stay in this item loop
+                        continue
+                    # Try aria2 unless disabled
+                    if not args.no_aria2:
+                        aria2_path = args.aria2_path or shutil.which("aria2c")
+                        if not aria2_path:
+                            print(
+                                color(
+                                    "aria2 not found or disabled. Using PySmartDL fallback.",
+                                    Color.YELLOW,
+                                )
+                            )
+                        else:
+                            print(color("Found aria2", Color.GREEN))
+                            cmd = [
+                                aria2_path,
+                                "--continue=true",
+                                f"--max-connection-per-server={args.max_connections}",
+                                f"--split={args.max_connections}",
+                                f"--dir={args.download_dir}",
+                                url,
+                            ]
+                            if args.verbose:
+                                print(color("Running aria2c:", Color.MAGENTA), " ".join(cmd))
+                            # Run aria2 and wait; let it print directly to terminal
+                            ret = subprocess.call(cmd)
+                            if ret == 0:
+                                print(color("Download finished.", Color.GREEN))
+                            else:
+                                print(
+                                    color(f"aria2 exited with code {ret}", Color.YELLOW)
+                                )
+                            # Return to the file list loop either way
+                            continue
+                    # Fallback: PySmartDL
+                    if args.no_aria2:
+                        print(
+                            color(
+                                "aria2 not found or disabled. Using PySmartDL fallback.",
+                                Color.YELLOW,
+                            )
+                        )
+                    try:
+                        from pySmartDL import SmartDL  # type: ignore
+                    except Exception:
+                        print(
+                            color(
+                                "PySmartDL not installed; please install or use aria2.",
+                                Color.YELLOW,
+                            )
+                        )
+                        # back to file list in this item loop
+                        continue
+                    # PySmartDL single file
+                    print(color(f"Downloading: {url}", Color.MAGENTA))
+                    obj = SmartDL(url, dest=args.download_dir)
+                    obj.start(blocking=False)
+                    while not obj.isFinished():
+                        time.sleep(0.2)
+                    if obj.isSuccessful():
+                        print(color("Download finished.", Color.GREEN))
+                    elif obj.get_errors():
+                        print(color("Failed", Color.YELLOW))
+                    # Continue to show the file list again regardless
+                    continue
     else:
         print(table)
         return 0
