@@ -377,20 +377,23 @@ def format_item_details(
         ef = ext_filter.lower().lstrip(".")
         files = [f for f in files if f.get("name", "").lower().endswith("." + ef)]
 
+    idx_w = 3
     name_w = max(10, *(len(f.get("name", "")) for f in files)) if files else 10
     size_w = 12
     hash_label = hash_type.upper()
     hash_w = max(8, len(hash_label), 40)
     header = (
-        color("FILE".ljust(name_w), Color.BOLD)
+        color("#".rjust(idx_w), Color.BOLD)
+        + "  "
+        + color("FILE".ljust(name_w), Color.BOLD)
         + "  "
         + color("SIZE".rjust(size_w), Color.BOLD)
         + "  "
         + color(hash_label.ljust(hash_w), Color.BOLD)
     )
     lines.append(header)
-    lines.append("-" * (name_w + size_w + hash_w + 4))
-    for f in files:
+    lines.append("-" * (idx_w + name_w + size_w + hash_w + 6))
+    for i, f in enumerate(files, 1):
         name = f.get("name", "")
         size = f.get("size")
         md5 = f.get("md5")
@@ -410,9 +413,11 @@ def format_item_details(
             hash_s = sha256 or "-"
         else:  # default sha1
             hash_s = sha1 or "-"
-        lines.append(
-            f"{name.ljust(name_w)}  {size_s.rjust(size_w)}  {hash_s[:hash_w].ljust(hash_w)}"
-        )
+        idxc = color(str(i).rjust(idx_w), Color.MAGENTA)
+        namec = color(name.ljust(name_w), Color.BLUE)
+        sizec = color(size_s.rjust(size_w), Color.GREEN)
+        hashc = color(str(hash_s)[:hash_w].ljust(hash_w), Color.DIM)
+        lines.append(f"{idxc}  {namec}  {sizec}  {hashc}")
     return "\n".join(lines)
 
 
@@ -651,7 +656,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # when viewing raw json, go back to results loop
                 continue
             else:
-                # Single colorful files table only
+                # Print only the single colorful files table (no duplicate/plain table)
                 print(
                     format_item_details(
                         details,
@@ -684,21 +689,10 @@ def main(argv: Optional[List[str]] = None) -> int:
             if not files_list:
                 print(color("No files match filters.", Color.YELLOW))
                 return 0
-            # Prompt with back option
-            print()
-            for idx, f in enumerate(files_list, 1):
-                name = f.get("name", "")
-                size = f.get("size")
-                hs = f.get(args.hash) or "-"
-                try:
-                    size_s = human_size(int(size)) if size not in (None, "") else "-"
-                except Exception:
-                    size_s = str(size) if size is not None else "-"
-                print(
-                    f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(size_s.rjust(8), Color.GREEN)}  {color((hs if isinstance(hs, str) else str(hs))[:40].ljust(40), Color.DIM)}  {color(name, Color.BLUE)}"
-                )
+            # We already printed the indexed colorful table above; no second list
             try:
-                prompt = "Select files (e.g., 1,3,5-7), 'b' to go back, 'q' to quit: "
+                # Single-file selection only
+                prompt = "Select a file (index), 'b' to go back, 'q' to quit: "
                 raw = input(color(prompt, Color.BOLD))
             except EOFError:
                 return 0
@@ -748,38 +742,30 @@ def main(argv: Optional[List[str]] = None) -> int:
                         f"--max-connection-per-server={args.max_connections}",
                         f"--split={args.max_connections}",
                         f"--dir={args.download_dir}",
-                        "--stderr=true",
                         url,
                     ]
                     # Show controls hint and command if verbose
                     print(color("[x=cancel, q=quit]", Color.DIM))
                     if args.verbose:
                         print(color("Running aria2c:", Color.MAGENTA), " ".join(cmd))
-                    proc = subprocess.Popen(
-                        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-                    )
+                    # Option 1: let aria2 write directly to terminal (inherits stdout/stderr)
+                    proc = subprocess.Popen(cmd)
                     try:
-                        while True:
+                        while proc.poll() is None:
                             key = read_key_nonblocking()
                             if key:
                                 k = key.lower()
                                 if k == "x":
                                     proc.terminate()
                                     print()
-                                    print(color("Downloads canceled.", Color.YELLOW))
+                                    print(color("Download canceled.", Color.YELLOW))
                                     break
                                 if k == "q":
                                     proc.terminate()
                                     print()
                                     print(color("Quitting.", Color.YELLOW))
                                     raise SystemExit(0)
-                            line = proc.stdout.readline() if proc.stdout else ""
-                            if not line:
-                                if proc.poll() is not None:
-                                    break
-                                time.sleep(0.1)
-                                continue
-                            print(line, end="")
+                            time.sleep(0.1)
                         # After completion, return to results list
                         continue
                     finally:
