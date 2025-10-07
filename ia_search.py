@@ -315,6 +315,49 @@ def fetch_item_details(identifier: str, debug: bool = False) -> dict:
     return fetch_json(url, debug=debug)
 
 
+def build_file_info(details: dict, f: dict, hash_type: str, human: bool, download_dir: str) -> dict:
+    name = f.get("name", "")
+    size = f.get("size")
+    try:
+        size_i = int(size) if size not in (None, "") else None
+    except Exception:
+        size_i = None
+    info = {
+        "name": name,
+        "size": size_i,
+        "size_h": human_size(size_i) if (human and isinstance(size_i, int)) else (str(size) if size is not None else "-"),
+        "md5": f.get("md5"),
+        "sha1": f.get("sha1"),
+        "sha256": f.get("sha256") or f.get("sha256sum"),
+        "format": f.get("format"),
+        "mtime": f.get("mtime"),
+        "crc32": f.get("crc32"),
+        "url": build_file_url(details, name) or "",
+        "is_torrent": str(name).lower().endswith(".torrent"),
+        "download_dir": download_dir,
+        "preferred_hash": hash_type,
+    }
+    return info
+
+
+def print_file_details(info: dict) -> None:
+    print(color("\nFILE DETAILS", Color.BOLD))
+    print(f"Name: {color(info['name'], Color.BLUE)}")
+    print(f"Size: {color(info['size_h'], Color.GREEN)}" + (f"  ({info['size']:,} bytes)" if isinstance(info['size'], int) else ""))
+    if info.get("format"):
+        print(f"Format: {info['format']}")
+    if info.get("mtime"):
+        print(f"Modified: {info['mtime']}")
+    if info.get("crc32"):
+        print(f"CRC32: {info['crc32']}")
+    print(f"MD5:   {info.get('md5') or '-'}")
+    print(f"SHA1:  {info.get('sha1') or '-'}")
+    print(f"SHA256:{info.get('sha256') or '-'}")
+    print(f"URL:   {color(info['url'], Color.MAGENTA)}")
+    if info.get("is_torrent"):
+        print(color("Note: This is a .torrent file.", Color.DIM))
+
+
 def _first(meta: dict, key: str) -> Optional[str]:
     v = meta.get(key)
     if isinstance(v, list):
@@ -732,16 +775,72 @@ def main(argv: Optional[List[str]] = None) -> int:
                         print(color("Selection out of range.", Color.YELLOW))
                         continue
                     sel_file = files_list[one_idx - 1]
-                    url = build_file_url(details, sel_file.get("name", ""))
+                    finfo = build_file_info(
+                        details,
+                        sel_file,
+                        hash_type=args.hash,
+                        human=not args.no_human,
+                        download_dir=args.download_dir,
+                    )
+                    # Show a details view and action menu
+                    print_file_details(finfo)
+                    try:
+                        action = input(
+                            color("Action: [d]ownload, [o]pen URL, [c]opy URL, [b]ack, [q]uit: ", Color.BOLD)
+                        ).strip().lower()
+                    except EOFError:
+                        return 0
+                    if action in ("b", ""):
+                        # back to file list view
+                        continue
+                    if action == "q":
+                        return 0
+                    if action == "o":
+                        import webbrowser
+                        url = finfo.get("url")
+                        if url:
+                            webbrowser.open(url)
+                            print(color("Opened URL in browser.", Color.DIM))
+                        else:
+                            print(color("No URL to open.", Color.YELLOW))
+                        continue
+                    if action == "c":
+                        try:
+                            import subprocess as _sp
+                            url = finfo.get("url") or ""
+                            if not url:
+                                print(color("No URL to copy.", Color.YELLOW))
+                            else:
+                                # Prefer Wayland-native wl-copy, then fall back
+                                if shutil.which('wl-copy'):
+                                    _sp.run(['wl-copy'], input=url.encode(), check=False)
+                                    print(color("Copied URL to clipboard (wl-copy).", Color.DIM))
+                                elif shutil.which('xclip'):
+                                    _sp.run(['xclip','-selection','clipboard'], input=url.encode(), check=False)
+                                    print(color("Copied URL to clipboard (xclip).", Color.DIM))
+                                elif shutil.which('xsel'):
+                                    _sp.run(['xsel','--clipboard','--input'], input=url.encode(), check=False)
+                                    print(color("Copied URL to clipboard (xsel).", Color.DIM))
+                                elif shutil.which('pbcopy'):
+                                    _sp.run(['pbcopy'], input=url.encode(), check=False)
+                                    print(color("Copied URL to clipboard (pbcopy).", Color.DIM))
+                                elif os.name == 'nt':
+                                    _sp.run(['clip'], input=url.encode(), check=False)
+                                    print(color("Copied URL to clipboard (clip).", Color.DIM))
+                                else:
+                                    print(color("No clipboard utility found (try wl-clipboard).", Color.YELLOW))
+                        except Exception:
+                            print(color("Failed to copy to clipboard.", Color.YELLOW))
+                        continue
+                    if action != "d":
+                        print(color("Unknown action.", Color.YELLOW))
+                        continue
+                    url = finfo.get("url")
                     if not url:
                         print(color("Could not build file URL.", Color.YELLOW))
                         continue
-                    print(
-                        color(f"Planned download to {args.download_dir}:", Color.BOLD),
-                        url,
-                    )
                     if args.dry_run:
-                        # after dry-run, stay in this item loop
+                        print(color("Dry run: skipping download.", Color.DIM))
                         continue
                     # Try aria2 unless disabled
                     if not args.no_aria2:
