@@ -240,6 +240,8 @@ def prompt_index(n: int) -> Optional[int]:
         return None
     if not raw:
         return None
+    if raw.lower() == 'q':
+        return 'q'  # type: ignore[return-value]
     try:
         idx = int(raw)
     except ValueError:
@@ -597,8 +599,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p.add_argument(
         "--download-dir",
-        default=".",
-        help="Directory to save downloads (default: current dir)",
+        default="./downloads",
+        help="Directory to save downloads (default: ./downloads)",
     )
     p.add_argument(
         "--dry-run",
@@ -698,8 +700,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
             print("\n".join(numbered))
             sel = prompt_index(len(items))
-            if sel is None or sel == "q":
-                # Quit interactive loop
+            if sel == "q":
+                break
+            if sel is None:
+                # Quietly handle blank/invalid without extra print, or print once on EOF
                 print(table)
                 break
             chosen = items[sel]
@@ -847,6 +851,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         print(color("Dry run: skipping download.", Color.DIM))
                         continue
                     # Try aria2 unless disabled
+                    # Ensure download directory exists just-in-time
+                    try:
+                        os.makedirs(args.download_dir, exist_ok=True)
+                    except Exception as e:
+                        print(color(f"Could not create download dir '{args.download_dir}': {e}", Color.YELLOW), file=sys.stderr)
+                        continue
                     if not args.no_aria2:
                         aria2_path = args.aria2_path or shutil.which("aria2c")
                         if not aria2_path:
