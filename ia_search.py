@@ -322,6 +322,7 @@ def build_file_info(details: dict, f: dict, hash_type: str, human: bool, downloa
         size_i = int(size) if size not in (None, "") else None
     except Exception:
         size_i = None
+    identifier = _first(details.get('metadata', {}), 'identifier')
     info = {
         "name": name,
         "size": size_i,
@@ -333,6 +334,7 @@ def build_file_info(details: dict, f: dict, hash_type: str, human: bool, downloa
         "mtime": f.get("mtime"),
         "crc32": f.get("crc32"),
         "url": build_file_url(details, name) or "",
+        "page_url": f"https://archive.org/details/{identifier}" if identifier else "",
         "is_torrent": str(name).lower().endswith(".torrent"),
         "download_dir": download_dir,
         "preferred_hash": hash_type,
@@ -353,7 +355,9 @@ def print_file_details(info: dict) -> None:
     print(f"MD5:   {info.get('md5') or '-'}")
     print(f"SHA1:  {info.get('sha1') or '-'}")
     print(f"SHA256:{info.get('sha256') or '-'}")
-    print(f"URL:   {color(info['url'], Color.MAGENTA)}")
+    print(f"Download URL: {color(info['url'], Color.MAGENTA)}")
+    if info.get('page_url'):
+        print(f"Page URL:     {color(info['page_url'], Color.MAGENTA)}")
     if info.get("is_torrent"):
         print(color("Note: This is a .torrent file.", Color.DIM))
 
