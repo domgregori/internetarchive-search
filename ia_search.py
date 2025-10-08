@@ -236,6 +236,8 @@ def build_url(
     sort: Optional[str],
     fields: List[str],
     description_terms: Optional[List[str]] = None,
+    date_after: Optional[str] = None,
+    date_before: Optional[str] = None,
 ) -> str:
     base = "https://archive.org/advancedsearch.php"
     # Build query
@@ -263,6 +265,28 @@ def build_url(
     params.append(("output", "json"))
     # no JSONP callback for CLI
     params.append(("save", "yes"))
+
+    # Optional date range parameters for UI-friendly filtering
+    def _split(d: str):
+        try:
+            y, m, dd = d.split("-")
+            return y, m, dd
+        except Exception:
+            return None
+    if date_after:
+        parts = _split(date_after)
+        if parts:
+            y, m, dd = parts
+            params.append(("date_from_year", y))
+            params.append(("date_from_month", m))
+            params.append(("date_from_day", dd))
+    if date_before:
+        parts = _split(date_before)
+        if parts:
+            y, m, dd = parts
+            params.append(("date_to_year", y))
+            params.append(("date_to_month", m))
+            params.append(("date_to_day", dd))
 
     return base + "?" + urllib.parse.urlencode(params, doseq=True)
 
@@ -729,6 +753,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Optional sort order if using --sort without order",
     )
     p.add_argument(
+        "--date-before",
+        help="Filter results where date/publicdate is before or on this date (YYYY-MM-DD)",
+    )
+    p.add_argument(
+        "--date-after",
+        help="Filter results where date/publicdate is after or on this date (YYYY-MM-DD)",
+    )
+    p.add_argument(
         "--list-sort-options",
         action="store_true",
         help="List curated supported sort options and exit",
@@ -868,8 +900,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     if args.description_terms:
         desc_terms.extend(args.description_terms)
 
+    # Augment query with date range if provided; default to epoch..today
+    from datetime import datetime
+    date_after = args.date_after or "1970-01-01"
+    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+    q_aug = f"({args.query}) AND date:[{date_after} TO {date_before}]"
+
     url = build_url(
-        args.query,
+        q_aug,
         args.mediatype,
         args.rows,
         args.page,
@@ -967,8 +1005,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if getattr(args, 'description_terms', None):
                     desc_terms.extend(args.description_terms)
                 try:
+                    from datetime import datetime
+                    date_after = args.date_after or "1970-01-01"
+                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    q_aug = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     url = build_url(
-                        args.query,
+                        q_aug,
                         args.mediatype,
                         args.rows,
                         args.page,
@@ -989,8 +1031,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 results_filter = None
                 args.page = 1
                 try:
+                    from datetime import datetime
+                    date_after = args.date_after or "1970-01-01"
+                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    q_aug2 = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     url = build_url(
-                        args.query,
+                        q_aug2,
                         args.mediatype,
                         args.rows,
                         args.page,
@@ -1019,8 +1065,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # fetch next page
                 args.page += 1
                 try:
+                    from datetime import datetime
+                    date_after = args.date_after or "1970-01-01"
+                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    q_aug2 = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     next_url = build_url(
-                        args.query,
+                        q_aug2,
                         args.mediatype,
                         args.rows,
                         args.page,
@@ -1045,8 +1095,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if args.page > 1:
                     args.page -= 1
                 try:
+                    q_extra = []
+                    if args.date_before:
+                        q_extra.append(f"publicdate:[* TO {args.date_before}]")
+                    if args.date_after:
+                        q_extra.append(f"publicdate:[{args.date_after} TO *]")
+                    q_aug2 = args.query if not q_extra else f"({args.query}) AND {' AND '.join(q_extra)}"
                     prev_url = build_url(
-                        args.query,
+                        q_aug2,
                         args.mediatype,
                         args.rows,
                         args.page,

@@ -22,6 +22,9 @@ Interactive CLI to query Archive.org Advanced Search, browse results, inspect pe
   - `ia-search -q "Beatles"`
 - Show the generated API URL:
   - `ia-search -q "Ubuntu 22.04" --print-url`
+- Date range filtering (inclusive):
+  - `ia-search -q "Ubuntu" --date-after 2022-01-01 --date-before 2023-12-31`
+  - If not provided, `--date-after` defaults to `1970-01-01` and `--date-before` defaults to today (UTC).
 - Request different fields (identifier, downloads, title are default):
   - `ia-search -q "Ubuntu" --fields identifier downloads title`
   - Rich default fields are included by default (identifier,title,creator,date,publicdate,downloads,mediatype,item_size,month,week,year,language,num_reviews,subject,publisher,rights,licenseurl)
