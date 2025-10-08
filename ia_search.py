@@ -11,6 +11,7 @@ Notes:
 """
 
 import argparse
+import signal
 import json
 import sys
 import textwrap
@@ -199,6 +200,14 @@ def parse_items(payload: dict) -> List[Item]:
         it.date = d.get("date") or d.get("publicdate")
         items.append(it)
     return items
+
+
+_NEEDS_REDRAW = False
+
+
+def _on_resize(signum, frame):  # pragma: no cover
+    global _NEEDS_REDRAW
+    _NEEDS_REDRAW = True
 
 
 def format_table(items: List[Item], long_columns: bool = False, terminal_aware: bool = True) -> str:
@@ -732,6 +741,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
 
     args = p.parse_args(argv)
+    # Setup terminal resize handler to trigger redraws
+    try:
+        signal.signal(signal.SIGWINCH, _on_resize)
+    except Exception:
+        pass
     # If requested, print sorts and exit
     if args.list_sorts:
         print(list_sorts())
@@ -787,7 +801,10 @@ def main(argv: Optional[List[str]] = None) -> int:
     table = format_table(items, getattr(args, 'long_columns', False), terminal_aware=not getattr(args, 'no_terminal_aware', False))
     if items:
         while True:
-            # print formatted results table with headers
+            # print formatted results table with headers (clear if resized)
+            if _NEEDS_REDRAW:
+                print("\033[2J\033[H", end="")
+                globals()['_NEEDS_REDRAW'] = False
             print(
                 format_table(
                     items,
@@ -899,6 +916,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                     end = start + page_size
                     page_slice = files_list[start:end]
 
+                    if _NEEDS_REDRAW:
+                        print("\033[2J\033[H", end="")
+                        globals()['_NEEDS_REDRAW'] = False
                     print(
                         format_item_details(
                             {**details, "files": page_slice},
