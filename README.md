@@ -91,3 +91,15 @@ Interactive actions (highlights)
 - Lint/format (optional, if you use these tools):
   - `ruff check .`
   - `black .`
+
+### Shell Completions
+
+- Bash:
+  - Source ad hoc: `source completions/ia-search.bash`
+  - Or install:
+    - System: copy to `/etc/bash_completion.d/ia-search`
+    - User: copy to `~/.local/share/bash-completion/completions/ia-search`
+- Zsh:
+  - Copy `completions/_ia-search` to a folder in `$fpath` (e.g., `~/.zsh/completions`)
+  - Add to `~/.zshrc`: `fpath=(~/.zsh/completions $fpath)`
+  - Initialize: `autoload -U compinit && compinit`
