@@ -829,7 +829,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 raw = ""
             if not raw:
                 sel = None
-            elif raw.lower() in {"q", "n", "p"}:
+            elif raw.lower() in {"q", "n", "p", "r"}:
                 sel = raw  # handled downstream
             elif raw.startswith("/"):
                 sel = "/"
@@ -858,6 +858,26 @@ def main(argv: Optional[List[str]] = None) -> int:
                     items = [it for it in base_items if lf in (it.identifier.lower() + " " + (it.title or "").lower())]
                 else:
                     items = base_items
+                continue
+            if isinstance(sel, str) and sel == 'r':
+                # reset results filter and return to first page
+                results_filter = None
+                args.page = 1
+                try:
+                    url = build_url(
+                        args.query,
+                        args.mediatype,
+                        args.rows,
+                        args.page,
+                        args.sort,
+                        args.fields,
+                        description_terms=(desc_terms or None),
+                    )
+                    payload = fetch_json(url, debug=args.verbose > 0)
+                    items = parse_items(payload)
+                except Exception as e:
+                    print(color(f"Failed to reload page 1: {e}", Color.YELLOW))
+                    items = parse_items(payload)
                 continue
             if isinstance(sel, str) and sel == 'r':
                 # reset results filter
@@ -961,6 +981,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         files_list = [
                             f for f in files_list if sub in f.get("name", "").lower()
                         ]
+                    # Apply runtime files_filter if set (after args-based filters, before paging)
+                    if 'files_filter' in locals() and files_filter:
+                        sub = files_filter.lower()
+                        files_list = [
+                            f for f in files_list if sub in f.get("name", "").lower()
+                        ]
                     if not files_list:
                         print(color("No files match filters.", Color.YELLOW))
                         break
@@ -1006,12 +1032,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if raw.lower() == "q":
                         # Quit entirely
                         return 0
-                    if raw == "/":
-                        # Set runtime filter
+                    if raw.startswith("/"):
+                        # Set runtime filter; allow inline "/foo" or prompt if just "/"
                         try:
-                            term = (
-                                input(color("Filter text: ", Color.BOLD)).strip()
-                            )
+                            term = raw[1:] if len(raw) > 1 else input(color("Filter text: ", Color.BOLD)).strip()
                         except EOFError:
                             term = ""
                         files_filter = term or None
