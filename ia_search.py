@@ -55,6 +55,89 @@ class Color:
 def color(text: str, code: str) -> str:
     return f"{code}{text}{Color.RESET}"
 
+from contextlib import contextmanager
+import io
+from subprocess import Popen, DEVNULL
+
+@contextmanager
+def _silence_stdio():
+    saved_out, saved_err = sys.stdout, sys.stderr
+    try:
+        sys.stdout = io.StringIO()
+        sys.stderr = io.StringIO()
+        yield
+    finally:
+        sys.stdout, sys.stderr = saved_out, saved_err
+
+
+def open_url_quiet(url: str) -> bool:
+    """Open a URL using platform tools while suppressing console noise."""
+    try:
+        if sys.platform.startswith("linux"):
+            if shutil.which("xdg-open"):
+                Popen(["xdg-open", url], stdout=DEVNULL, stderr=DEVNULL)
+                return True
+            if shutil.which("gio"):
+                Popen(["gio", "open", url], stdout=DEVNULL, stderr=DEVNULL)
+                return True
+        elif sys.platform == "darwin":
+            Popen(["open", url], stdout=DEVNULL, stderr=DEVNULL)
+            return True
+        elif os.name == "nt":
+            try:
+                os.startfile(url)  # type: ignore[attr-defined]
+                return True
+            except Exception:
+                Popen(["cmd", "/c", "start", "", url], stdout=DEVNULL, stderr=DEVNULL, shell=True)
+                return True
+        # Fallback to webbrowser with silenced stdio
+        with _silence_stdio():
+            import webbrowser
+            webbrowser.open(url)
+        return True
+    except Exception:
+        return False
+
+
+def copy_to_clipboard(text: str) -> bool:
+    """Copy text to system clipboard using common utilities.
+    Returns True on success, False otherwise. Prints user feedback.
+    """
+    try:
+        import subprocess as _sp
+        if shutil.which("wl-copy"):
+            _sp.run(["wl-copy"], input=text.encode(), check=False)
+            print(color("Copied to clipboard (wl-copy).", Color.YELLOW))
+            time.sleep(2)
+            return True
+        if shutil.which("xclip"):
+            _sp.run(["xclip", "-selection", "clipboard"], input=text.encode(), check=False)
+            print(color("Copied to clipboard (xclip).", Color.YELLOW))
+            time.sleep(2)
+            return True
+        if shutil.which("xsel"):
+            _sp.run(["xsel", "--clipboard", "--input"], input=text.encode(), check=False)
+            print(color("Copied to clipboard (xsel).", Color.YELLOW))
+            time.sleep(2)
+            return True
+        if shutil.which("pbcopy"):
+            _sp.run(["pbcopy"], input=text.encode(), check=False)
+            print(color("Copied to clipboard (pbcopy).", Color.YELLOW))
+            time.sleep(2)
+            return True
+        if os.name == "nt":
+            _sp.run(["clip"], input=text.encode(), check=False)
+            print(color("Copied to clipboard (clip).", Color.YELLOW))
+            time.sleep(2)
+            return True
+        print(color("No clipboard utility found (try wl-clipboard).", Color.YELLOW))
+        time.sleep(2)
+        return False
+    except Exception:
+        print(color("Failed to copy to clipboard.", Color.YELLOW))
+        time.sleep(2)
+        return False
+
 
 def read_key_nonblocking() -> Optional[str]:
     if os.name == "nt" and msvcrt is not None:
@@ -114,6 +197,34 @@ def list_sorts() -> str:
     lines = [color("Supported sort keys (curated):", Color.BOLD)]
     for s in sorted(ALLOWED_SORT):
         lines.append(f"  - {s}")
+    return "\n".join(lines)
+
+
+DEFAULT_FIELDS = [
+    "identifier",
+    "title",
+    "creator",
+    "date",
+    "publicdate",
+    "downloads",
+    "mediatype",
+    "item_size",
+    "month",
+    "week",
+    "year",
+    "language",
+    "num_reviews",
+    "subject",
+    "publisher",
+    "rights",
+    "licenseurl",
+]
+
+
+def list_fields() -> str:
+    lines = [color("Common field options (curated):", Color.BOLD)]
+    for f in DEFAULT_FIELDS:
+        lines.append(f"  - {f}")
     return "\n".join(lines)
 
 
@@ -618,9 +729,14 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Optional sort order if using --sort without order",
     )
     p.add_argument(
-        "--list-sorts",
+        "--list-sort-options",
         action="store_true",
         help="List curated supported sort options and exit",
+    )
+    p.add_argument(
+        "--list-field-options",
+        action="store_true",
+        help="List curated field options and exit",
     )
     p.add_argument(
         "--long-columns",
@@ -635,28 +751,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     p.add_argument(
         "--fields",
         nargs="*",
-        default=[
-            "identifier",
-            "title",
-            "creator",
-            "date",
-            "publicdate",
-            "downloads",
-            "mediatype",
-            "item_size",
-            "month",
-            "week",
-            "year",
-            "language",
-            "num_reviews",
-            "subject",
-            "publisher",
-            "rights",
-            "licenseurl",
-        ],
+        default=DEFAULT_FIELDS,
         help=(
-            "Fields to request; defaults to a rich set including "
-            "identifier,title,creator,date,publicdate,downloads,mediatype,item_size,month,week,year,language,num_reviews,subject,publisher,rights,licenseurl"
+            "Fields to request; defaults to a curated set (see --list-field-options)"
         ),
     )
     p.add_argument(
@@ -674,12 +771,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         action="append",
         dest="description_terms",
         help="Add a term to description:(...) clause (repeatable)",
-    )
-    # Always interactive now; flag removed
-    p.add_argument(
-        "--json",
-        action="store_true",
-        help="In interactive mode, print raw item JSON instead of a table",
     )
     p.add_argument(
         "--ext",
@@ -706,11 +797,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--download-dir",
         default="./downloads",
         help="Directory to save downloads (default: ./downloads)",
-    )
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Print planned download URLs but do not download",
     )
     p.add_argument(
         "--file-contains",
@@ -746,9 +832,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         signal.signal(signal.SIGWINCH, _on_resize)
     except Exception:
         pass
-    # If requested, print sorts and exit
-    if args.list_sorts:
+    # If requested, print lists and exit
+    if getattr(args, 'list_sort_options', False):
         print(list_sorts())
+        return 0
+    if getattr(args, 'list_field_options', False):
+        print(list_fields())
         return 0
 
     # Normalize sort if --order given without order in --sort
@@ -767,7 +856,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not args.query:
         print(
-            color("Error: --query is required unless using --list-sorts", Color.YELLOW),
+            color("Error: --query is required unless using --list-sort-options", Color.YELLOW),
             file=sys.stderr,
         )
         return 2
@@ -986,13 +1075,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
                 print(table)
                 return 2
-            if args.json:
-                print(json.dumps(details, indent=2))
-                # when viewing raw json, go back to results loop
-                continue
-            else:
-                # Item-scoped interactive files loop
-                while True:
+            # Item-scoped interactive files loop
+            while True:
                     # Print only the single colorful files table
                     # Build file list for selection
                     files_obj = details.get("files", {})
@@ -1052,7 +1136,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         )
                     )
                     print()  # spacer above footer
-                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [/] filter  [r]eset  [b]ack  [q]uit  [c]opy page )"
+                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [/] filter  [r]eset  [b]ack  [q]uit  [c]opy page  [o]pen page )"
                     print(color(footer, Color.DIM))
                     try:
                         sys.stdout.flush()
@@ -1084,6 +1168,25 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if raw.lower() == "b":
                         # Back to results list
                         break
+                    if raw.lower() == 'c':
+                        ident = _first(details.get("metadata", {}), "identifier")
+                        page_url = f"https://archive.org/details/{ident}" if ident else ""
+                        if not page_url:
+                            print(color("No page URL available.", Color.YELLOW))
+                        else:
+                            copy_to_clipboard(page_url)
+                        continue
+                    if raw.lower() == 'o':
+                        ident = _first(details.get("metadata", {}), "identifier")
+                        page_url = f"https://archive.org/details/{ident}" if ident else ""
+                        if not page_url:
+                            print(color("No page URL available.", Color.YELLOW))
+                        else:
+                            if open_url_quiet(page_url):
+                                print(color("Opened page in browser.", Color.DIM))
+                            else:
+                                print(color("Failed to open page URL.", Color.YELLOW))
+                        continue
                     if raw.lower() == 'n':
                         files_page = min(total_pages, files_page + 1)
                         continue
@@ -1114,7 +1217,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     print_file_details(finfo)
                     # Footer-style action hints (bracketed keys)
                     print()  # spacer above footer
-                    print(color("( [d]ownload  [h]ash  [o]pen  [c]opy  [b]ack  [q]uit )", Color.DIM))
+                    print(color("( [d]ownload  [h]ash search  [o]pen  [c]opy  [b]ack  [q]uit )", Color.DIM))
                     try:
                         action = input(color("Selection or Action: ", Color.BOLD)).strip().lower()
                     except EOFError:
@@ -1125,81 +1228,22 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if action == "q":
                         return 0
                     if action == "o":
-                        import webbrowser
-
-                        url = finfo.get("url")
-                        if url:
-                            webbrowser.open(url)
-                            print(color("Opened URL in browser.", Color.DIM))
+                        dl_url = finfo.get("url")
+                        if dl_url:
+                            if open_url_quiet(dl_url):
+                                print(color("Opened Download URL in browser.", Color.DIM))
+                            else:
+                                print(color("Failed to open Download URL.", Color.YELLOW))
                         else:
-                            print(color("No URL to open.", Color.YELLOW))
+                            print(color("No Download URL to open.", Color.YELLOW))
                         continue
                     if action == "c":
-                        try:
-                            import subprocess as _sp
-
-                            url = finfo.get("url") or ""
-                            if not url:
-                                print(color("No URL to copy.", Color.YELLOW))
-                            else:
-                                # Prefer Wayland-native wl-copy, then fall back
-                                if shutil.which("wl-copy"):
-                                    _sp.run(
-                                        ["wl-copy"], input=url.encode(), check=False
-                                    )
-                                    print(
-                                        color(
-                                            "Copied URL to clipboard (wl-copy).",
-                                            Color.DIM,
-                                        )
-                                    )
-                                elif shutil.which("xclip"):
-                                    _sp.run(
-                                        ["xclip", "-selection", "clipboard"],
-                                        input=url.encode(),
-                                        check=False,
-                                    )
-                                    print(
-                                        color(
-                                            "Copied URL to clipboard (xclip).",
-                                            Color.DIM,
-                                        )
-                                    )
-                                elif shutil.which("xsel"):
-                                    _sp.run(
-                                        ["xsel", "--clipboard", "--input"],
-                                        input=url.encode(),
-                                        check=False,
-                                    )
-                                    print(
-                                        color(
-                                            "Copied URL to clipboard (xsel).", Color.DIM
-                                        )
-                                    )
-                                elif shutil.which("pbcopy"):
-                                    _sp.run(["pbcopy"], input=url.encode(), check=False)
-                                    print(
-                                        color(
-                                            "Copied URL to clipboard (pbcopy).",
-                                            Color.DIM,
-                                        )
-                                    )
-                                elif os.name == "nt":
-                                    _sp.run(["clip"], input=url.encode(), check=False)
-                                    print(
-                                        color(
-                                            "Copied URL to clipboard (clip).", Color.DIM
-                                        )
-                                    )
-                                else:
-                                    print(
-                                        color(
-                                            "No clipboard utility found (try wl-clipboard).",
-                                            Color.YELLOW,
-                                        )
-                                    )
-                        except Exception:
-                            print(color("Failed to copy to clipboard.", Color.YELLOW))
+                        # Copy the Download URL from file info
+                        dl_url = finfo.get("url") or ""
+                        if not dl_url:
+                            print(color("No Download URL to copy.", Color.YELLOW))
+                        else:
+                            copy_to_clipboard(dl_url)
                         continue
                     if action == "h":
                         print("\n")
@@ -1232,9 +1276,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                         continue
                     if not url:
                         print(color("Could not build file URL.", Color.YELLOW))
-                        continue
-                    if args.dry_run:
-                        print(color("Dry run: skipping download.", Color.DIM))
                         continue
                     # Try aria2 unless disabled
                     # Ensure download directory exists just-in-time
