@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run
 """
 Simple CLI to search archive.org advanced search and print results in a colored table.
 
@@ -35,6 +35,7 @@ except Exception:  # pragma: no cover
     requests = None  # fallback to urllib if requests is unavailable
 
 import urllib.parse
+import html as _html
 import urllib.request
 
 
@@ -235,13 +236,17 @@ def format_table(items: List[Item]) -> str:
 
 def prompt_index(n: int) -> Optional[int]:
     try:
-        raw = input(color("Select a row number (or 'q' to quit): ", Color.BOLD)).strip()
+        raw = input(color("Select a row number (n=next, p=prev, 'q' to quit): ", Color.BOLD)).strip()
     except EOFError:
         return None
     if not raw:
         return None
-    if raw.lower() == 'q':
-        return 'q'  # type: ignore[return-value]
+    if raw.lower() == "q":
+        return "q"  # type: ignore[return-value]
+    if raw.lower() == "n":
+        return "n"  # type: ignore[return-value]
+    if raw.lower() == "p":
+        return "p"  # type: ignore[return-value]
     try:
         idx = int(raw)
     except ValueError:
@@ -317,21 +322,52 @@ def fetch_item_details(identifier: str, debug: bool = False) -> dict:
     return fetch_json(url, debug=debug)
 
 
-def build_file_info(details: dict, f: dict, hash_type: str, human: bool, download_dir: str) -> dict:
+def search_sha1_rg_adguard(sha1: str, debug: bool = False) -> Optional[Tuple[str, str]]:
+    try:
+        url = "https://files.rg-adguard.net/search"
+        data = {"search": sha1}
+        if debug:
+            print(color("POST", Color.MAGENTA), url, data, file=sys.stderr)
+        resp = requests.post(url, data=data, timeout=20)
+    except Exception as e:
+        if debug:
+            print(color(f"Search request failed: {e}", Color.YELLOW), file=sys.stderr)
+        return None
+    if resp.status_code != 200:
+        return None
+    text = resp.text
+    # Look for: <td class="desc">  <a href="...">NAME...</a></td>
+    import re
+
+    m = re.search(r'<td\s+class="desc"[^>]*>\s*<a\s+href="([^"]+)">([^<]+)</a>', text)
+    if not m:
+        return None
+    href = m.group(1)
+    name = _html.unescape(m.group(2))
+    # Make absolute if needed
+    if href.startswith("/"):
+        href = urllib.parse.urljoin("https://files.rg-adguard.net", href)
+    return name, href
+
+
+def build_file_info(
+    details: dict, f: dict, hash_type: str, human: bool, download_dir: str
+) -> dict:
     name = f.get("name", "")
     size = f.get("size")
     try:
         size_i = int(size) if size not in (None, "") else None
     except Exception:
         size_i = None
-    identifier = _first(details.get('metadata', {}), 'identifier')
+    identifier = _first(details.get("metadata", {}), "identifier")
     info = {
         "name": name,
         "size": size_i,
-        "size_h": human_size(size_i) if (human and isinstance(size_i, int)) else (str(size) if size is not None else "-"),
+        "size_h": human_size(size_i)
+        if (human and isinstance(size_i, int))
+        else (str(size) if size is not None else "-"),
         "md5": f.get("md5"),
         "sha1": f.get("sha1"),
-        "sha256": f.get("sha256") or f.get("sha256sum"),
         "format": f.get("format"),
         "mtime": f.get("mtime"),
         "crc32": f.get("crc32"),
@@ -347,7 +383,10 @@ def build_file_info(details: dict, f: dict, hash_type: str, human: bool, downloa
 def print_file_details(info: dict) -> None:
     print(color("\nFILE DETAILS", Color.BOLD))
     print(f"Name: {color(info['name'], Color.BLUE)}")
-    print(f"Size: {color(info['size_h'], Color.GREEN)}" + (f"  ({info['size']:,} bytes)" if isinstance(info['size'], int) else ""))
+    print(
+        f"Size: {color(info['size_h'], Color.GREEN)}"
+        + (f"  ({info['size']:,} bytes)" if isinstance(info["size"], int) else "")
+    )
     if info.get("format"):
         print(f"Format: {info['format']}")
     if info.get("mtime"):
@@ -356,9 +395,8 @@ def print_file_details(info: dict) -> None:
         print(f"CRC32: {info['crc32']}")
     print(f"MD5:   {info.get('md5') or '-'}")
     print(f"SHA1:  {info.get('sha1') or '-'}")
-    print(f"SHA256:{info.get('sha256') or '-'}")
     print(f"Download URL: {color(info['url'], Color.MAGENTA)}")
-    if info.get('page_url'):
+    if info.get("page_url"):
         print(f"Page URL:     {color(info['page_url'], Color.MAGENTA)}")
     if info.get("is_torrent"):
         print(color("Note: This is a .torrent file.", Color.DIM))
@@ -449,7 +487,6 @@ def format_item_details(
         size = f.get("size")
         md5 = f.get("md5")
         sha1 = f.get("sha1")
-        sha256 = f.get("sha256") or f.get("sha256sum")
         if size in (None, ""):
             size_s = "-"
         else:
@@ -460,12 +497,10 @@ def format_item_details(
                 size_s = str(size)
         if hash_type == "md5":
             hash_s = md5 or "-"
-        elif hash_type == "sha256":
-            hash_s = sha256 or "-"
         else:  # default sha1
             hash_s = sha1 or "-"
         # Wrap the filename into chunks of wrap_w, only the first line is numbered
-        chunks = [name[x:x+wrap_w] for x in range(0, len(name), wrap_w)] or [""]
+        chunks = [name[x : x + wrap_w] for x in range(0, len(name), wrap_w)] or [""]
         idxc = color(str(i).rjust(idx_w), Color.MAGENTA)
         sizec = color(size_s.rjust(size_w), Color.GREEN)
         hashc = color(str(hash_s)[:hash_w].ljust(hash_w), Color.DIM)
@@ -475,9 +510,9 @@ def format_item_details(
                 lines.append(f"{idxc}  {namec}  {sizec}  {hashc}")
             else:
                 # continuation lines: spaces for index/size/hash to keep alignment
-                blank_idx = ' ' * idx_w
-                blank_size = ' ' * size_w
-                blank_hash = ' ' * hash_w
+                blank_idx = " " * idx_w
+                blank_size = " " * size_w
+                blank_hash = " " * hash_w
                 lines.append(f"{blank_idx}  {namec}  {blank_size}  {blank_hash}")
     return "\n".join(lines)
 
@@ -565,12 +600,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         dest="description_terms",
         help="Add a term to description:(...) clause (repeatable)",
     )
-    p.add_argument(
-        "-i",
-        "--interactive",
-        action="store_true",
-        help="Interactive mode: select a result to view details",
-    )
+    # Always interactive now; flag removed
     p.add_argument(
         "--json",
         action="store_true",
@@ -587,7 +617,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     p.add_argument(
         "--hash",
-        choices=["sha1", "md5", "sha256"],
+        choices=["sha1", "md5"],
         default="sha1",
         help="Hash column to display in details (default: sha1)",
     )
@@ -689,15 +719,16 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     items = parse_items(payload)
     table = format_table(items)
-    if args.interactive and items:
+    if items:
         while True:
             # show results with numbers
-            numbered = []
-            numbered.append("\n")
+            numbered = ["",]
+            # Page-local indices 1..rows
             for idx, it in enumerate(items, 1):
                 numbered.append(
                     f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(it.identifier, Color.BLUE)}  {color((it.title or ''), Color.DIM)}"
                 )
+            numbered.append(color(f"(page {args.page}, n = next, p = prev)", Color.DIM))
             print("\n".join(numbered))
             sel = prompt_index(len(items))
             if sel == "q":
@@ -706,6 +737,47 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # Quietly handle blank/invalid without extra print, or print once on EOF
                 print(table)
                 break
+            if isinstance(sel, str) and sel == 'n':
+                # fetch next page
+                args.page += 1
+                try:
+                    next_url = build_url(
+                        args.query,
+                        args.mediatype,
+                        args.rows,
+                        args.page,
+                        args.sort,
+                        args.fields,
+                        description_terms=(desc_terms or None),
+                    )
+                    payload = fetch_json(next_url, debug=args.verbose > 0)
+                    items = parse_items(payload)
+                    table = format_table(items)
+                    continue
+                except Exception as e:
+                    print(color(f"Failed to load next page: {e}", Color.YELLOW))
+                    continue
+            if isinstance(sel, str) and sel == 'p':
+                # fetch previous page if possible
+                if args.page > 1:
+                    args.page -= 1
+                try:
+                    prev_url = build_url(
+                        args.query,
+                        args.mediatype,
+                        args.rows,
+                        args.page,
+                        args.sort,
+                        args.fields,
+                        description_terms=(desc_terms or None),
+                    )
+                    payload = fetch_json(prev_url, debug=args.verbose > 0)
+                    items = parse_items(payload)
+                    table = format_table(items)
+                    continue
+                except Exception as e:
+                    print(color(f"Failed to load previous page: {e}", Color.YELLOW))
+                    continue
             chosen = items[sel]
             try:
                 details = fetch_item_details(chosen.identifier, debug=args.verbose > 0)
@@ -793,9 +865,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                     # Show a details view and action menu
                     print_file_details(finfo)
                     try:
-                        action = input(
-                            color("Action: [d]ownload, [o]pen URL, [c]opy URL, [b]ack, [q]uit: ", Color.BOLD)
-                        ).strip().lower()
+                        action = (
+                            input(
+                                color(
+                                    "Action: [d]ownload, find [h]ash, [o]pen URL, [c]opy URL, [b]ack, [q]uit: ",
+                                    Color.BOLD,
+                                )
+                            )
+                            .strip()
+                            .lower()
+                        )
                     except EOFError:
                         return 0
                     if action in ("b", ""):
@@ -805,6 +884,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         return 0
                     if action == "o":
                         import webbrowser
+
                         url = finfo.get("url")
                         if url:
                             webbrowser.open(url)
@@ -815,35 +895,99 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if action == "c":
                         try:
                             import subprocess as _sp
+
                             url = finfo.get("url") or ""
                             if not url:
                                 print(color("No URL to copy.", Color.YELLOW))
                             else:
                                 # Prefer Wayland-native wl-copy, then fall back
-                                if shutil.which('wl-copy'):
-                                    _sp.run(['wl-copy'], input=url.encode(), check=False)
-                                    print(color("Copied URL to clipboard (wl-copy).", Color.DIM))
-                                elif shutil.which('xclip'):
-                                    _sp.run(['xclip','-selection','clipboard'], input=url.encode(), check=False)
-                                    print(color("Copied URL to clipboard (xclip).", Color.DIM))
-                                elif shutil.which('xsel'):
-                                    _sp.run(['xsel','--clipboard','--input'], input=url.encode(), check=False)
-                                    print(color("Copied URL to clipboard (xsel).", Color.DIM))
-                                elif shutil.which('pbcopy'):
-                                    _sp.run(['pbcopy'], input=url.encode(), check=False)
-                                    print(color("Copied URL to clipboard (pbcopy).", Color.DIM))
-                                elif os.name == 'nt':
-                                    _sp.run(['clip'], input=url.encode(), check=False)
-                                    print(color("Copied URL to clipboard (clip).", Color.DIM))
+                                if shutil.which("wl-copy"):
+                                    _sp.run(
+                                        ["wl-copy"], input=url.encode(), check=False
+                                    )
+                                    print(
+                                        color(
+                                            "Copied URL to clipboard (wl-copy).",
+                                            Color.DIM,
+                                        )
+                                    )
+                                elif shutil.which("xclip"):
+                                    _sp.run(
+                                        ["xclip", "-selection", "clipboard"],
+                                        input=url.encode(),
+                                        check=False,
+                                    )
+                                    print(
+                                        color(
+                                            "Copied URL to clipboard (xclip).",
+                                            Color.DIM,
+                                        )
+                                    )
+                                elif shutil.which("xsel"):
+                                    _sp.run(
+                                        ["xsel", "--clipboard", "--input"],
+                                        input=url.encode(),
+                                        check=False,
+                                    )
+                                    print(
+                                        color(
+                                            "Copied URL to clipboard (xsel).", Color.DIM
+                                        )
+                                    )
+                                elif shutil.which("pbcopy"):
+                                    _sp.run(["pbcopy"], input=url.encode(), check=False)
+                                    print(
+                                        color(
+                                            "Copied URL to clipboard (pbcopy).",
+                                            Color.DIM,
+                                        )
+                                    )
+                                elif os.name == "nt":
+                                    _sp.run(["clip"], input=url.encode(), check=False)
+                                    print(
+                                        color(
+                                            "Copied URL to clipboard (clip).", Color.DIM
+                                        )
+                                    )
                                 else:
-                                    print(color("No clipboard utility found (try wl-clipboard).", Color.YELLOW))
+                                    print(
+                                        color(
+                                            "No clipboard utility found (try wl-clipboard).",
+                                            Color.YELLOW,
+                                        )
+                                    )
                         except Exception:
                             print(color("Failed to copy to clipboard.", Color.YELLOW))
                         continue
+                    if action == "h":
+                        print("\n")
+                        sha1 = finfo.get("sha1")
+                        if not sha1:
+                            print(
+                                color(
+                                    "No SHA1 available for this file.",
+                                    Color.YELLOW | Color.BOLD
+                                    if hasattr(Color, "BOLD")
+                                    else Color.YELLOW,
+                                )
+                            )
+                            time.sleep(3)
+                            continue
+                        res = search_sha1_rg_adguard(sha1, debug=args.verbose > 0)
+                        if not res:
+                            print(color("No file found on rg-adguard.", Color.YELLOW))
+                            time.sleep(3)
+                        else:
+                            name, link = res
+                            print(color("Found on rg-adguard:", Color.YELLOW))
+                            print(f"Name: {name}")
+                            print(f"Link: {link}")
+                            time.sleep(3)
+                        continue
+                    url = finfo.get("url")
                     if action != "d":
                         print(color("Unknown action.", Color.YELLOW))
                         continue
-                    url = finfo.get("url")
                     if not url:
                         print(color("Could not build file URL.", Color.YELLOW))
                         continue
@@ -855,7 +999,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                     try:
                         os.makedirs(args.download_dir, exist_ok=True)
                     except Exception as e:
-                        print(color(f"Could not create download dir '{args.download_dir}': {e}", Color.YELLOW), file=sys.stderr)
+                        print(
+                            color(
+                                f"Could not create download dir '{args.download_dir}': {e}",
+                                Color.YELLOW,
+                            ),
+                            file=sys.stderr,
+                        )
                         continue
                     if not args.no_aria2:
                         aria2_path = args.aria2_path or shutil.which("aria2c")
@@ -874,10 +1024,15 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 f"--max-connection-per-server={args.max_connections}",
                                 f"--split={args.max_connections}",
                                 f"--dir={args.download_dir}",
-                                url,
                             ]
+                            if not args.verbose:
+                                cmd += ["--console-log-level=error"]
+                            cmd.append(url)
                             if args.verbose:
-                                print(color("Running aria2c:", Color.MAGENTA), " ".join(cmd))
+                                print(
+                                    color("Running aria2c:", Color.MAGENTA),
+                                    " ".join(cmd),
+                                )
                             # Run aria2 and wait; let it print directly to terminal
                             ret = subprocess.call(cmd)
                             if ret == 0:
