@@ -193,7 +193,11 @@ def parse_items(payload: dict) -> List[Item]:
             continue
         downloads = d.get("downloads")
         title = d.get("title")
-        items.append(Item(identifier=str(identifier), downloads=downloads, title=title))
+        # Create item and attach commonly used extra fields
+        it = Item(identifier=str(identifier), downloads=downloads, title=title)
+        # Prefer explicit date, fallback to publicdate if provided
+        it.date = d.get("date") or d.get("publicdate")
+        items.append(it)
     return items
 
 
@@ -204,6 +208,7 @@ def format_table(items: List[Item]) -> str:
     # determine widths
     id_width = max(10, *(len(i.identifier) for i in items))
     title_width = min(60, max(5, *(len(i.title or "") for i in items)))
+    date_width = 10  # YYYY-MM-DD
     # downloads field can be missing
     dl_values = [i.downloads for i in items if i.downloads is not None]
     dl_width = max(9, len(str(max(dl_values))) if dl_values else 9)
@@ -217,8 +222,10 @@ def format_table(items: List[Item]) -> str:
         + color("DOWNLOADS".rjust(dl_width), Color.BOLD)
         + "  "
         + color("TITLE".ljust(title_width), Color.BOLD)
+        + "  "
+        + color("DATE".ljust(date_width), Color.BOLD)
     )
-    sep = "-" * (3 + id_width + dl_width + title_width + 6)
+    sep = "-" * (3 + id_width + dl_width + title_width + date_width + 8)
 
     lines = [header, sep]
     for idx, it in enumerate(items, 1):
@@ -226,11 +233,14 @@ def format_table(items: List[Item]) -> str:
         if len(title) > title_width:
             title = title[: title_width - 1] + "…"
         dl = "-" if it.downloads is None else str(it.downloads)
+        date_raw = getattr(it, "date", None) or ""
+        date_s = (str(date_raw)[:10]) if date_raw else "-"
         idxs = color(str(idx).rjust(3), Color.MAGENTA)
         ident = color(it.identifier.ljust(id_width), Color.BLUE)
         dlc = color(dl.rjust(dl_width), Color.GREEN)
         titlec = color(title.ljust(title_width), Color.DIM)
-        lines.append(f"{idxs}  {ident}  {dlc}  {titlec}")
+        datec = color(date_s.ljust(date_width), Color.DIM)
+        lines.append(f"{idxs}  {ident}  {dlc}  {titlec}  {datec}")
     return "\n".join(lines)
 
 
@@ -721,15 +731,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     table = format_table(items)
     if items:
         while True:
-            # show results with numbers
-            numbered = ["",]
-            # Page-local indices 1..rows
-            for idx, it in enumerate(items, 1):
-                numbered.append(
-                    f"{color(str(idx).rjust(3), Color.MAGENTA)}  {color(it.identifier, Color.BLUE)}  {color((it.title or ''), Color.DIM)}"
-                )
-            numbered.append(color(f"(page {args.page}, n = next, p = prev)", Color.DIM))
-            print("\n".join(numbered))
+            # print formatted results table with headers
+            print(format_table(items))
+            print(color(f"(page {args.page}, n = next, p = prev, q = quit)", Color.DIM))
             sel = prompt_index(len(items))
             if sel == "q":
                 break
