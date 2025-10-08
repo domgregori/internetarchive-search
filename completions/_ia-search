@@ -1,0 +1,44 @@
+#compdef ia-search ia_search.py
+
+_arguments -s -S \
+  '(-q --query)'{-q,--query}'[Search query string]:query:_message "query"' \
+  '--mediatype[Restrict mediatype]:mediatype:(software audio movies texts image data)' \
+  '--rows[Rows per page]:rows:(5 10 25 50 100)' \
+  '--page[Page number]:page:(1 2 3 4 5 10)' \
+  '--sort[Sort expression]:sort:(\
+downloads\ desc downloads\ asc \
+week\ desc week\ asc \
+month\ desc month\ asc \
+year\ desc year\ asc \
+publicdate\ desc publicdate\ asc \
+date\ desc date\ asc \
+titleSorter\ desc titleSorter\ asc \
+creatorSorter\ desc creatorSorter\ asc \
+identifier\ asc identifier\ desc \
+avg_rating\ desc avg_rating\ asc \
+item_size\ desc item_size\ asc \
+random\ desc random\ asc \
+)' \
+  '--order[Sort order]:order:(asc desc)' \
+  '--list-sort-options[List curated supported sort options and exit]' \
+  '--list-field-options[List curated field options and exit]' \
+  '--fields[Fields to request]:fields:(identifier title creator date publicdate downloads mediatype item_size month week year language num_reviews subject publisher rights licenseurl)' \
+  '--print-url[Print the generated URL before results]' \
+  '--iso[Add description:(iso OR cd-rom) to the query]' \
+  '--description-term[Add a term to description:(...) clause]:term:_message "term"' \
+  '--ext[Filter files by extension]:ext:_message "ext (e.g., iso, zip)"' \
+  '--no-human[Show raw bytes instead of human-readable sizes]' \
+  '--hash[Hash column]:hash:(sha1 md5)' \
+  '--download[Open details menu ready to download]' \
+  '--download-dir[Download directory]:dir:_files -/' \
+  '--file-contains[Filter files by substring]:substr:_message "substring"' \
+  '--aria2-path[Path to aria2c binary]:file:_files' \
+  '--max-connections[Max connections per file]:n:(4 8 16 32)' \
+  '--no-aria2[Force PySmartDL fallback]' \
+  '--verbose[Increase verbosity]' \
+  '--long-columns[Disable truncation/wrapping in tables]' \
+  '--no-terminal-aware[Disable terminal width aware sizing]' \
+  '--date-before[End date YYYY-MM-DD]:date:_message "YYYY-MM-DD"' \
+  '--date-after[Start date YYYY-MM-DD]:date:_message "YYYY-MM-DD"' \
+  '*:filename:_files'
+

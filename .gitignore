@@ -79,3 +79,5 @@ env/
 uv.lock
 requirements*.txt
 
+# codex
+AGENTS.md
