@@ -798,6 +798,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     items = parse_items(payload)
+    results_filter = None  # persistent results filter across paging
     table = format_table(items, getattr(args, 'long_columns', False), terminal_aware=not getattr(args, 'no_terminal_aware', False))
     if items:
         while True:
@@ -813,28 +814,56 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
             )
             print()  # spacer above footer
-            print(color(f"( Page: {args.page}  [n]ext  [p]rev  [q]uit )", Color.DIM))
+            print(color(f"( Page: {args.page}  [n]ext  [p]rev  [/] filter  [r]eset  [q]uit )", Color.DIM))
             # unified prompt label; footer lists actions
             print(color("", Color.DIM), end="")
             sel = None
             try:
-                raw = input(color("Selection or Action: ", Color.BOLD)).strip()
+                # show active results filter in prompt if set
+                prompt = (
+                    f"Selection or Action (filter='{results_filter}'): "
+                    if results_filter else "Selection or Action: "
+                )
+                raw = input(color(prompt, Color.BOLD)).strip()
             except EOFError:
                 raw = ""
-            if raw:
-                if raw.lower() in {"q","n","p"}:
-                    sel = raw  # handled downstream
-                else:
-                    try:
-                        idx = int(raw)
-                        sel = idx if 1 <= idx <= len(items) else None
-                        if isinstance(sel, int):
-                            sel -= 1
-                    except ValueError:
-                        print(color("Invalid input.", Color.YELLOW))
-                        sel = None
-            else:
+            if not raw:
                 sel = None
+            elif raw.lower() in {"q", "n", "p"}:
+                sel = raw  # handled downstream
+            elif raw.startswith("/"):
+                sel = "/"
+            else:
+                try:
+                    idx = int(raw)
+                    if 1 <= idx <= len(items):
+                        sel = idx - 1
+                    else:
+                        sel = None
+                except ValueError:
+                    print(color("Invalid input.", Color.YELLOW))
+                    sel = None
+            if sel == "/":
+                # set runtime results filter (by identifier/title substring)
+                try:
+                    # allow immediate term after '/', e.g., '/foo'
+                    term = raw[1:] if len(raw) > 1 else input(color("Filter text: ", Color.BOLD)).strip()
+                except EOFError:
+                    term = ""
+                results_filter = term or None
+                # apply filter to current items
+                base_items = parse_items(payload)
+                if results_filter:
+                    lf = results_filter.lower()
+                    items = [it for it in base_items if lf in (it.identifier.lower() + " " + (it.title or "").lower())]
+                else:
+                    items = base_items
+                continue
+            if isinstance(sel, str) and sel == 'r':
+                # reset results filter
+                results_filter = None
+                items = parse_items(payload)
+                continue
             if sel == "q":
                 break
             if sel is None:
@@ -855,7 +884,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         description_terms=(desc_terms or None),
                     )
                     payload = fetch_json(next_url, debug=args.verbose > 0)
-                    items = parse_items(payload)
+                    base_items = parse_items(payload)
+                    if results_filter:
+                        lf = results_filter.lower()
+                        items = [it for it in base_items if lf in (it.identifier.lower() + " " + (it.title or "").lower())]
+                    else:
+                        items = base_items
                     table = format_table(items)
                     continue
                 except Exception as e:
@@ -876,7 +910,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                         description_terms=(desc_terms or None),
                     )
                     payload = fetch_json(prev_url, debug=args.verbose > 0)
-                    items = parse_items(payload)
+                    base_items = parse_items(payload)
+                    if results_filter:
+                        lf = results_filter.lower()
+                        items = [it for it in base_items if lf in (it.identifier.lower() + " " + (it.title or "").lower())]
+                    else:
+                        items = base_items
                     table = format_table(items)
                     continue
                 except Exception as e:
@@ -951,7 +990,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         )
                     )
                     print()  # spacer above footer
-                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [b]ack  [q]uit  [c]opy page )"
+                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [/] filter  [r]eset  [b]ack  [q]uit  [c]opy page )"
                     print(color(footer, Color.DIM))
                     try:
                         sys.stdout.flush()
@@ -967,6 +1006,21 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if raw.lower() == "q":
                         # Quit entirely
                         return 0
+                    if raw == "/":
+                        # Set runtime filter
+                        try:
+                            term = (
+                                input(color("Filter text: ", Color.BOLD)).strip()
+                            )
+                        except EOFError:
+                            term = ""
+                        files_filter = term or None
+                        files_page = 1
+                        continue
+                    if raw.lower() == "r":
+                        files_filter = None
+                        files_page = 1
+                        continue
                     if raw.lower() == "b":
                         # Back to results list
                         break
