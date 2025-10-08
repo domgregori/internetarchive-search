@@ -201,16 +201,30 @@ def parse_items(payload: dict) -> List[Item]:
     return items
 
 
-def format_table(items: List[Item], long_columns: bool = False) -> str:
+def format_table(items: List[Item], long_columns: bool = False, terminal_aware: bool = True) -> str:
     if not items:
         return color("No results.", Color.YELLOW)
 
     # determine widths
     id_width = max(10, *(len(i.identifier) for i in items))
-    # default 50-char wrap for title column unless long_columns
-    wrap_w = 50
-    title_width = (max(5, *(len(i.title or "") for i in items)) if long_columns else wrap_w)
     date_width = 10  # YYYY-MM-DD
+    wrap_w = 50
+    if long_columns:
+        title_width = max(5, *(len(i.title or "") for i in items))
+    else:
+        # terminal-aware allocation to title if enabled
+        if terminal_aware:
+            term_cols = shutil.get_terminal_size(fallback=(120, 24)).columns
+            # gaps: between 5 columns -> 4 gaps of two spaces = 8
+            dl_values = [i.downloads for i in items if i.downloads is not None]
+            dl_width = max(9, len(str(max(dl_values))) if dl_values else 9)
+            fixed = 3 + id_width + dl_width + date_width + 8
+            avail = max(10, term_cols - fixed)
+            # Apply a reasonable max to avoid overly wide columns
+            MAX_TITLE = 120
+            title_width = min(avail, MAX_TITLE)
+        else:
+            title_width = wrap_w
     # downloads field can be missing
     dl_values = [i.downloads for i in items if i.downloads is not None]
     dl_width = max(9, len(str(max(dl_values))) if dl_values else 9)
@@ -232,7 +246,11 @@ def format_table(items: List[Item], long_columns: bool = False) -> str:
     lines = [header, sep]
     for idx, it in enumerate(items, 1):
         full_title = (it.title or "").replace("\n", " ")
-        chunks = ([full_title] if long_columns else [full_title[x : x + wrap_w] for x in range(0, len(full_title), wrap_w)] or [""])
+        if long_columns:
+            chunks = [full_title]
+        else:
+            width = title_width if terminal_aware else wrap_w
+            chunks = [full_title[x : x + width] for x in range(0, len(full_title), width)] or [""]
         dl = "-" if it.downloads is None else str(it.downloads)
         date_raw = getattr(it, "date", None) or ""
         date_s = (str(date_raw)[:10]) if date_raw else "-"
@@ -445,6 +463,8 @@ def format_item_details(
     ext_filter: Optional[str] = None,
     human: bool = True,
     hash_type: str = "sha1",
+    long_columns: bool = False,
+    terminal_aware: bool = True,
 ) -> str:
     metadata = data.get("metadata", {})
     files_obj = data.get("files", [])
@@ -485,7 +505,21 @@ def format_item_details(
     idx_w = 3
     # Wrap filenames to a fixed width so long names don't break layout
     wrap_w = 50
-    name_w = wrap_w
+    # terminal-aware name column unless disabled
+    if long_columns:
+        name_w = max(len(f.get("name", "")) for f in files) if files else wrap_w
+    elif terminal_aware:
+        term_cols = shutil.get_terminal_size(fallback=(120, 24)).columns
+        gaps = 6
+        size_w = 12
+        hash_label = hash_type.upper()
+        hash_w = max(8, len(hash_label), 40)
+        fixed = idx_w + size_w + hash_w + gaps
+        avail = max(10, term_cols - fixed)
+        MAX_NAME = 140
+        name_w = min(avail, MAX_NAME)
+    else:
+        name_w = wrap_w
     size_w = 12
     hash_label = hash_type.upper()
     hash_w = max(8, len(hash_label), 40)
@@ -517,8 +551,12 @@ def format_item_details(
             hash_s = md5 or "-"
         else:  # default sha1
             hash_s = sha1 or "-"
-        # Wrap the filename into chunks of wrap_w, only the first line is numbered
-        chunks = [name[x : x + wrap_w] for x in range(0, len(name), wrap_w)] or [""]
+        # Wrap the filename into chunks based on chosen width unless long_columns
+        if long_columns:
+            chunks = [name]
+        else:
+            width = name_w if terminal_aware else wrap_w
+            chunks = [name[x : x + width] for x in range(0, len(name), width)] or [""]
         idxc = color(str(i).rjust(idx_w), Color.MAGENTA)
         sizec = color(size_s.rjust(size_w), Color.GREEN)
         hashc = color(str(hash_s)[:hash_w].ljust(hash_w), Color.DIM)
@@ -579,6 +617,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         "--long-columns",
         action="store_true",
         help="Disable truncation/wrapping in results and files tables",
+    )
+    p.add_argument(
+        "--no-terminal-aware",
+        action="store_true",
+        help="Disable terminal-width aware column sizing (use fixed widths)",
     )
     p.add_argument(
         "--fields",
@@ -741,11 +784,17 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     items = parse_items(payload)
-    table = format_table(items, getattr(args, 'long_columns', False))
+    table = format_table(items, getattr(args, 'long_columns', False), terminal_aware=not getattr(args, 'no_terminal_aware', False))
     if items:
         while True:
             # print formatted results table with headers
-            print(format_table(items, getattr(args, 'long_columns', False)))
+            print(
+                format_table(
+                    items,
+                    getattr(args, 'long_columns', False),
+                    terminal_aware=not getattr(args, 'no_terminal_aware', False),
+                )
+            )
             print(color(f"(page {args.page}, n = next, p = prev, q = quit)", Color.DIM))
             sel = prompt_index(len(items))
             if sel == "q":
@@ -856,6 +905,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                             ext_filter=None,  # already filtered
                             human=not args.no_human,
                             hash_type=args.hash,
+                            long_columns=getattr(args, 'long_columns', False),
+                            terminal_aware=not getattr(args, 'no_terminal_aware', False),
                         )
                     )
                     print(color(f"(page {files_page}/{total_pages}, n=next, p=prev)", Color.DIM))
