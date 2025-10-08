@@ -99,6 +99,43 @@ def open_url_quiet(url: str) -> bool:
         return False
 
 
+def render_title(name: str, terminal_aware: bool = True) -> None:
+    """Render a centered, rounded 3-line boxed title above a table.
+    Falls back to a single-line rounded title on very narrow terminals.
+    """
+    cols = shutil.get_terminal_size(fallback=(120, 24)).columns if terminal_aware else 80
+    # Minimum inner width: title len + 2 spaces padding, and at least 10
+    inner_min = max(len(name) + 2, 10)
+    # Compact if terminal too narrow for 3-line box
+    if cols < inner_min + 2:  # corners + inner
+        # Single-line compact: ╭ Name ╮ centered
+        inner = f" {name} "
+        top = f"╭{inner}╮"
+        pad = max(0, (cols - len(top)) // 2)
+        bold_name = color(name, Color.BOLD)
+        styled = top.replace(name, bold_name)
+        print(color(" " * pad + styled, Color.DIM))
+        return
+    # 3-line rounded box
+    # Prefer an odd inner width for perfect centering of the title text
+    inner_w = inner_min
+    if inner_w % 2 == 0:
+        inner_w += 1
+    # Center title within inner width
+    title_line = name.center(inner_w)
+    # Build lines
+    top = "╭" + ("─" * inner_w) + "╮"
+    mid = "│" + title_line + "│"
+    bot = "╰" + ("─" * inner_w) + "╯"
+    # Center the whole box within terminal
+    pad = max(0, (cols - len(top)) // 2)
+    # Style: dim box, bold title text only
+    mid_styled = mid.replace(name, color(name, Color.BOLD))
+    print(color(" " * pad + top, Color.DIM))
+    print(color(" " * pad, Color.DIM) + mid_styled)
+    print(color(" " * pad + bot, Color.DIM))
+
+
 def copy_to_clipboard(text: str) -> bool:
     """Copy text to system clipboard using common utilities.
     Returns True on success, False otherwise. Prints user feedback.
@@ -609,6 +646,7 @@ def format_item_details(
     hash_type: str = "sha1",
     long_columns: bool = False,
     terminal_aware: bool = True,
+    show_header: bool = True,
 ) -> str:
     metadata = data.get("metadata", {})
     files_obj = data.get("files", [])
@@ -624,19 +662,20 @@ def format_item_details(
     item_info = data.get("item", {}) or {}
     total_size = item_info.get("item_size")
     files_count = item_info.get("files_count")
-    lines = []
-    lines.append("\n")
-    lines.append(color(str(title), Color.BOLD))
-    lines.append(f"Creator: {creator}")
-    lines.append(f"Date: {date}")
+    header_lines: List[str] = []
+    header_lines.append("")
+    header_lines.append(color(str(title), Color.BOLD))
+    header_lines.append(f"Creator: {creator}")
+    header_lines.append(f"Date: {date}")
     if total_size is not None:
         try:
-            lines.append(f"Total Size: {int(total_size):,} bytes")
+            header_lines.append(f"Total Size: {int(total_size):,} bytes")
         except Exception:
-            lines.append(f"Total Size: {total_size}")
+            header_lines.append(f"Total Size: {total_size}")
     if files_count is not None:
-        lines.append(f"Files: {files_count}")
+        header_lines.append(f"Files: {files_count}")
     # Files table
+    lines: List[str] = []
     if not files:
         lines.append(color("No file list available.", Color.YELLOW))
         return "\n".join(lines)
@@ -714,7 +753,10 @@ def format_item_details(
                 blank_size = " " * size_w
                 blank_hash = " " * hash_w
                 lines.append(f"{blank_idx}  {namec}  {blank_size}  {blank_hash}")
-    return "\n".join(lines)
+    if show_header:
+        return "\n".join(header_lines)
+    else:
+        return "\n".join(lines)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -901,9 +943,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         desc_terms.extend(args.description_terms)
 
     # Augment query with date range if provided; default to epoch..today
-    from datetime import datetime
+    from datetime import datetime, timezone
     date_after = args.date_after or "1970-01-01"
-    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+    date_before = args.date_before or datetime.now(timezone.utc).strftime("%Y-%m-%d")
     q_aug = f"({args.query}) AND date:[{date_after} TO {date_before}]"
 
     url = build_url(
@@ -933,6 +975,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if _NEEDS_REDRAW:
                 print("\033[2J\033[H", end="")
                 globals()['_NEEDS_REDRAW'] = False
+            # Title above results table
+            render_title("Results", terminal_aware=not getattr(args, 'no_terminal_aware', False))
             print(
                 format_table(
                     items,
@@ -1005,9 +1049,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 if getattr(args, 'description_terms', None):
                     desc_terms.extend(args.description_terms)
                 try:
-                    from datetime import datetime
+                    from datetime import datetime, timezone
                     date_after = args.date_after or "1970-01-01"
-                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    date_before = args.date_before or datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     q_aug = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     url = build_url(
                         q_aug,
@@ -1031,9 +1075,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 results_filter = None
                 args.page = 1
                 try:
-                    from datetime import datetime
+                    from datetime import datetime, timezone
                     date_after = args.date_after or "1970-01-01"
-                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    date_before = args.date_before or datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     q_aug2 = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     url = build_url(
                         q_aug2,
@@ -1065,9 +1109,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # fetch next page
                 args.page += 1
                 try:
-                    from datetime import datetime
+                    from datetime import datetime, timezone
                     date_after = args.date_after or "1970-01-01"
-                    date_before = args.date_before or datetime.utcnow().strftime("%Y-%m-%d")
+                    date_before = args.date_before or datetime.now(timezone.utc).strftime("%Y-%m-%d")
                     q_aug2 = f"({args.query}) AND date:[{date_after} TO {date_before}]"
                     next_url = build_url(
                         q_aug2,
@@ -1181,6 +1225,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if _NEEDS_REDRAW:
                         print("\033[2J\033[H", end="")
                         globals()['_NEEDS_REDRAW'] = False
+                    # Print metadata header first
+                    print(
+                        format_item_details(
+                            details,
+                            ext_filter=None,
+                            human=not args.no_human,
+                            hash_type=args.hash,
+                            long_columns=getattr(args, 'long_columns', False),
+                            terminal_aware=not getattr(args, 'no_terminal_aware', False),
+                            show_header=True,
+                        )
+                    )
+                    # Then title and files table for the current page
+                    render_title("Files", terminal_aware=not getattr(args, 'no_terminal_aware', False))
                     print(
                         format_item_details(
                             {**details, "files": page_slice},
@@ -1189,6 +1247,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                             hash_type=args.hash,
                             long_columns=getattr(args, 'long_columns', False),
                             terminal_aware=not getattr(args, 'no_terminal_aware', False),
+                            show_header=False,
                         )
                     )
                     print()  # spacer above footer
@@ -1270,6 +1329,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         download_dir=args.download_dir,
                     )
                     # Show a details view and action menu
+                    render_title("File Info", terminal_aware=not getattr(args, 'no_terminal_aware', False))
                     print_file_details(finfo)
                     # Footer-style action hints (bracketed keys)
                     print()  # spacer above footer
