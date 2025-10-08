@@ -55,6 +55,37 @@ class Color:
 def color(text: str, code: str) -> str:
     return f"{code}{text}{Color.RESET}"
 
+HELP_MARKDOWN = """
+## Options
+
+- `-q, --query` Search string for Archive.org `q` parameter.
+- `--mediatype` Restrict results (e.g., `software`, `audio`, `movies`).
+- `--rows` Rows per page (default: 10).
+- `--page` Page number (default: 1).
+- `--sort` Sort expression (e.g., `downloads desc`, `date asc`).
+- `--order` Optional `asc|desc` to pair with a bare `--sort`.
+- `--list-sort-options` List curated sort options and exit.
+- `--list-field-options` List curated field options and exit.
+- `--fields` Fields to request (defaults to a curated set).
+- `--print-url` Print the generated API URL before results.
+- `--iso` Add `description:(iso OR cd-rom)` to the query.
+- `--description-term` Add term(s) to `description:(...)` (repeatable).
+- `--ext` Filter files by extension in details view (e.g., `iso`, `zip`).
+- `--no-human` Show raw bytes instead of human-readable sizes.
+- `--hash` Hash column to display (`sha1|md5`; default: `sha1`).
+- `--download` Open details menu ready to download.
+- `--download-dir` Directory to save downloads (default: `./downloads`).
+- `--file-contains` Filter files by substring before selection.
+- `--aria2-path` Path to `aria2c` binary.
+- `--max-connections` Max connections per file for aria2 (default: `16`).
+- `--no-aria2` Force PySmartDL fallback instead of aria2.
+- `--verbose` Increase verbosity (`-v`, `-vv`).
+- `--long-columns` Disable truncation/wrapping in tables.
+- `--no-terminal-aware` Disable terminal width aware sizing.
+- `--date-before` End date `YYYY-MM-DD`; defaults to today (UTC).
+- `--date-after` Start date `YYYY-MM-DD`; defaults to `1970-01-01`.
+"""
+
 from contextlib import contextmanager
 import io
 from subprocess import Popen, DEVNULL
@@ -795,6 +826,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="Optional sort order if using --sort without order",
     )
     p.add_argument(
+        "--help-markdown",
+        action="store_true",
+        help="Print Markdown-formatted options and exit",
+    )
+    p.add_argument(
         "--date-before",
         help="Filter results where date/publicdate is before or on this date (YYYY-MM-DD)",
     )
@@ -861,12 +897,6 @@ def main(argv: Optional[List[str]] = None) -> int:
         default="sha1",
         help="Hash column to display in details (default: sha1)",
     )
-    # Download-related flags
-    p.add_argument(
-        "--download",
-        action="store_true",
-        help="After selecting an item (-i), select files to download",
-    )
     p.add_argument(
         "--download-dir",
         default="./downloads",
@@ -912,6 +942,9 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
     if getattr(args, 'list_field_options', False):
         print(list_fields())
+        return 0
+    if getattr(args, 'help_markdown', False):
+        print(HELP_MARKDOWN.strip())
         return 0
 
     # Normalize sort if --order given without order in --sort
