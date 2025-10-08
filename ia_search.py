@@ -812,8 +812,29 @@ def main(argv: Optional[List[str]] = None) -> int:
                     terminal_aware=not getattr(args, 'no_terminal_aware', False),
                 )
             )
-            print(color(f"(page {args.page}, n = next, p = prev, q = quit)", Color.DIM))
-            sel = prompt_index(len(items))
+            print()  # spacer above footer
+            print(color(f"( Page: {args.page}  [n]ext  [p]rev  [q]uit )", Color.DIM))
+            # unified prompt label; footer lists actions
+            print(color("", Color.DIM), end="")
+            sel = None
+            try:
+                raw = input(color("Selection or Action: ", Color.BOLD)).strip()
+            except EOFError:
+                raw = ""
+            if raw:
+                if raw.lower() in {"q","n","p"}:
+                    sel = raw  # handled downstream
+                else:
+                    try:
+                        idx = int(raw)
+                        sel = idx if 1 <= idx <= len(items) else None
+                        if isinstance(sel, int):
+                            sel -= 1
+                    except ValueError:
+                        print(color("Invalid input.", Color.YELLOW))
+                        sel = None
+            else:
+                sel = None
             if sel == "q":
                 break
             if sel is None:
@@ -929,11 +950,16 @@ def main(argv: Optional[List[str]] = None) -> int:
                             terminal_aware=not getattr(args, 'no_terminal_aware', False),
                         )
                     )
-                    print(color(f"(page {files_page}/{total_pages}, n=next, p=prev)", Color.DIM))
+                    print()  # spacer above footer
+                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [b]ack  [q]uit  [c]opy page )"
+                    print(color(footer, Color.DIM))
                     try:
-                        # Single-file selection only
-                        prompt = "Select a file (index), n=next, p=prev, 'b' back, 'q' quit: "
                         sys.stdout.flush()
+                        # Include active filter in prompt label, if any
+                        if 'files_filter' in locals() and files_filter:
+                            prompt = f"Selection or Action (filter='{files_filter}'): "
+                        else:
+                            prompt = "Selection or Action: "
                         raw = input(color(prompt, Color.BOLD))
                     except EOFError:
                         return 0
@@ -972,17 +998,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                     )
                     # Show a details view and action menu
                     print_file_details(finfo)
+                    # Footer-style action hints (bracketed keys)
+                    print()  # spacer above footer
+                    print(color("( [d]ownload  [h]ash  [o]pen  [c]opy  [b]ack  [q]uit )", Color.DIM))
                     try:
-                        action = (
-                            input(
-                                color(
-                                    "Action: [d]ownload, find [h]ash, [o]pen URL, [c]opy URL, [b]ack, [q]uit: ",
-                                    Color.BOLD,
-                                )
-                            )
-                            .strip()
-                            .lower()
-                        )
+                        action = input(color("Selection or Action: ", Color.BOLD)).strip().lower()
                     except EOFError:
                         return 0
                     if action in ("b", ""):
