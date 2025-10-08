@@ -795,24 +795,17 @@ def main(argv: Optional[List[str]] = None) -> int:
                 # Item-scoped interactive files loop
                 while True:
                     # Print only the single colorful files table
-                    print(
-                        format_item_details(
-                            details,
-                            ext_filter=args.ext,
-                            human=not args.no_human,
-                            hash_type=args.hash,
-                        )
-                    )
                     # Build file list for selection
                     files_obj = details.get("files", {})
                     if isinstance(files_obj, dict):
-                        files_list = [
+                        files_list_all = [
                             {"name": k.lstrip("/"), **(v or {})}
                             for k, v in files_obj.items()
                         ]
                     else:
-                        files_list = files_obj or []
-                    # apply ext and contains filters again for selection
+                        files_list_all = files_obj or []
+                    # apply ext and contains filters before paging
+                    files_list = files_list_all
                     if args.ext:
                         ef = args.ext.lower().lstrip(".")
                         files_list = [
@@ -828,9 +821,30 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if not files_list:
                         print(color("No files match filters.", Color.YELLOW))
                         break
+
+                    # Files pagination using rows as page size
+                    if 'files_page' not in locals():
+                        files_page = 1
+                    page_size = max(1, args.rows)
+                    total_pages = max(1, (len(files_list) + page_size - 1) // page_size)
+                    if files_page > total_pages:
+                        files_page = total_pages
+                    start = (files_page - 1) * page_size
+                    end = start + page_size
+                    page_slice = files_list[start:end]
+
+                    print(
+                        format_item_details(
+                            {**details, "files": page_slice},
+                            ext_filter=None,  # already filtered
+                            human=not args.no_human,
+                            hash_type=args.hash,
+                        )
+                    )
+                    print(color(f"(page {files_page}/{total_pages}, n=next, p=prev)", Color.DIM))
                     try:
                         # Single-file selection only
-                        prompt = "Select a file (index), 'b' to go back, 'q' to quit: "
+                        prompt = "Select a file (index), n=next, p=prev, 'b' back, 'q' quit: "
                         sys.stdout.flush()
                         raw = input(color(prompt, Color.BOLD))
                     except EOFError:
@@ -842,6 +856,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                     if raw.lower() == "b":
                         # Back to results list
                         break
+                    if raw.lower() == 'n':
+                        files_page = min(total_pages, files_page + 1)
+                        continue
+                    if raw.lower() == 'p':
+                        files_page = max(1, files_page - 1)
+                        continue
                     # Single selection only
                     if "," in raw or "-" in raw:
                         print(color("Please select a single index only.", Color.YELLOW))
@@ -851,10 +871,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                     except ValueError:
                         print(color("Invalid selection.", Color.YELLOW))
                         continue
-                    if not (1 <= one_idx <= len(files_list)):
+                    if not (1 <= one_idx <= len(page_slice)):
                         print(color("Selection out of range.", Color.YELLOW))
                         continue
-                    sel_file = files_list[one_idx - 1]
+                    sel_file = page_slice[one_idx - 1]
                     finfo = build_file_info(
                         details,
                         sel_file,
