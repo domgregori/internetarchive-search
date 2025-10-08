@@ -201,13 +201,15 @@ def parse_items(payload: dict) -> List[Item]:
     return items
 
 
-def format_table(items: List[Item]) -> str:
+def format_table(items: List[Item], long_columns: bool = False) -> str:
     if not items:
         return color("No results.", Color.YELLOW)
 
     # determine widths
     id_width = max(10, *(len(i.identifier) for i in items))
-    title_width = min(60, max(5, *(len(i.title or "") for i in items)))
+    # default 50-char wrap for title column unless long_columns
+    wrap_w = 50
+    title_width = (max(5, *(len(i.title or "") for i in items)) if long_columns else wrap_w)
     date_width = 10  # YYYY-MM-DD
     # downloads field can be missing
     dl_values = [i.downloads for i in items if i.downloads is not None]
@@ -229,18 +231,24 @@ def format_table(items: List[Item]) -> str:
 
     lines = [header, sep]
     for idx, it in enumerate(items, 1):
-        title = (it.title or "").replace("\n", " ")
-        if len(title) > title_width:
-            title = title[: title_width - 1] + "…"
+        full_title = (it.title or "").replace("\n", " ")
+        chunks = ([full_title] if long_columns else [full_title[x : x + wrap_w] for x in range(0, len(full_title), wrap_w)] or [""])
         dl = "-" if it.downloads is None else str(it.downloads)
         date_raw = getattr(it, "date", None) or ""
         date_s = (str(date_raw)[:10]) if date_raw else "-"
         idxs = color(str(idx).rjust(3), Color.MAGENTA)
         ident = color(it.identifier.ljust(id_width), Color.BLUE)
         dlc = color(dl.rjust(dl_width), Color.GREEN)
-        titlec = color(title.ljust(title_width), Color.DIM)
         datec = color(date_s.ljust(date_width), Color.DIM)
-        lines.append(f"{idxs}  {ident}  {dlc}  {titlec}  {datec}")
+        for j, chunk in enumerate(chunks):
+            titlec = color(chunk.ljust(title_width), Color.DIM)
+            if j == 0:
+                lines.append(f"{idxs}  {ident}  {dlc}  {titlec}  {datec}")
+            else:
+                blank_idx = " " * 3
+                blank_ident = " " * id_width
+                blank_dl = " " * dl_width
+                lines.append(f"{blank_idx}  {blank_ident}  {blank_dl}  {titlec}  {' ' * date_width}")
     return "\n".join(lines)
 
 
@@ -568,6 +576,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="List curated supported sort options and exit",
     )
     p.add_argument(
+        "--long-columns",
+        action="store_true",
+        help="Disable truncation/wrapping in results and files tables",
+    )
+    p.add_argument(
         "--fields",
         nargs="*",
         default=[
@@ -728,11 +741,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 2
 
     items = parse_items(payload)
-    table = format_table(items)
+    table = format_table(items, getattr(args, 'long_columns', False))
     if items:
         while True:
             # print formatted results table with headers
-            print(format_table(items))
+            print(format_table(items, getattr(args, 'long_columns', False)))
             print(color(f"(page {args.page}, n = next, p = prev, q = quit)", Color.DIM))
             sel = prompt_index(len(items))
             if sel == "q":
