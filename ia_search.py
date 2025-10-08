@@ -814,7 +814,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
             )
             print()  # spacer above footer
-            print(color(f"( Page: {args.page}  [n]ext  [p]rev  [/] filter  [r]eset  [q]uit )", Color.DIM))
+            print(color(f"( Page: {args.page}  [n]ext  [p]rev  [/] filter  [r]eset  [s]earch  [q]uit )", Color.DIM))
             # unified prompt label; footer lists actions
             print(color("", Color.DIM), end="")
             sel = None
@@ -829,7 +829,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 raw = ""
             if not raw:
                 sel = None
-            elif raw.lower() in {"q", "n", "p", "r"}:
+            elif raw.lower() in {"q", "n", "p", "r", "s"}:
                 sel = raw  # handled downstream
             elif raw.startswith("/"):
                 sel = "/"
@@ -859,6 +859,42 @@ def main(argv: Optional[List[str]] = None) -> int:
                 else:
                     items = base_items
                 continue
+            if isinstance(sel, str) and sel == 's':
+                # start a new search query interactively
+                try:
+                    new_q = input(color("New query (blank to cancel): ", Color.BOLD)).strip()
+                except EOFError:
+                    new_q = ""
+                if not new_q:
+                    # no change
+                    continue
+                args.query = new_q
+                args.page = 1
+                results_filter = None
+                # rebuild description terms only if originally provided; include --iso only if set
+                desc_terms = []
+                if getattr(args, 'iso', False):
+                    desc_terms.extend(["iso", "cd-rom"])
+                if getattr(args, 'description_terms', None):
+                    desc_terms.extend(args.description_terms)
+                try:
+                    url = build_url(
+                        args.query,
+                        args.mediatype,
+                        args.rows,
+                        args.page,
+                        args.sort,
+                        args.fields,
+                        description_terms=(desc_terms or None),
+                    )
+                    payload = fetch_json(url, debug=args.verbose > 0)
+                    items = parse_items(payload)
+                    sel = None
+                    continue
+                except Exception as e:
+                    print(color(f"Search failed: {e}", Color.YELLOW))
+                    sel = None
+                    continue
             if isinstance(sel, str) and sel == 'r':
                 # reset results filter and return to first page
                 results_filter = None
