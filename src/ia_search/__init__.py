@@ -31,18 +31,13 @@ except Exception:
     msvcrt = None
 
 try:
-    import requests  # type: ignore
-except Exception:  # pragma: no cover
-    requests = None  # fallback to urllib if requests is unavailable
-
-try:
     import html2text  # type: ignore
 except Exception:  # pragma: no cover
     html2text = None
 
 import urllib.parse
 import html as _html
-import urllib.request
+import requests  # type: ignore
 
 
 # ANSI color helpers
@@ -367,26 +362,21 @@ def build_url(
 def fetch_json(url: str, debug: bool = False) -> dict:
     if debug:
         print(color(f"GET {url}", Color.MAGENTA), file=sys.stderr)
-    if requests is not None:
-        resp = requests.get(url, timeout=20)
+    resp = requests.get(url, timeout=20)
+    if debug:
+        print(color(f"Status {resp.status_code}", Color.DIM), file=sys.stderr)
+    resp.raise_for_status()
+    data = resp.text
+    try:
+        return resp.json()
+    except Exception:
         if debug:
-            print(color(f"Status {resp.status_code}", Color.DIM), file=sys.stderr)
-        resp.raise_for_status()
-        data = resp.text
-        try:
-            js = resp.json()
-        except Exception:
-            if debug:
-                print(
-                    color("Response not JSON; first 500 bytes:", Color.YELLOW),
-                    file=sys.stderr,
-                )
-                print(data[:500], file=sys.stderr)
-            raise
-        return js
-    # urllib fallback
-    with urllib.request.urlopen(url, timeout=20) as r:  # nosec B310 (fixed host)
-        data = r.read()
+            print(
+                color("Response not JSON; first 500 bytes:", Color.YELLOW),
+                file=sys.stderr,
+            )
+            print(data[:500], file=sys.stderr)
+        raise
     if debug:
         print(color(f"Bytes received: {len(data)}", Color.DIM), file=sys.stderr)
     return json.loads(data.decode("utf-8"))
@@ -718,6 +708,7 @@ def show_description_menu(details: dict, args: argparse.Namespace) -> bool:
         wrapped_lines.extend(textwrap.wrap(para, width=width) or [""])
 
     print()
+    # --- Description view ---
     render_title("Description", terminal_aware=terminal_aware)
     for line in wrapped_lines:
         print(line)
@@ -1076,12 +1067,14 @@ def main(argv: Optional[List[str]] = None) -> int:
     results_filter = None  # persistent results filter across paging
     table = format_table(items, getattr(args, 'long_columns', False), terminal_aware=not getattr(args, 'no_terminal_aware', False))
     if items:
+        # === Results view loop ===
         while True:
             # print formatted results table with headers (clear if resized)
             if _NEEDS_REDRAW:
                 print("\033[2J\033[H", end="")
                 globals()['_NEEDS_REDRAW'] = False
             # Title above results table
+            # --- Results view header/table ---
             render_title("Results", terminal_aware=not getattr(args, 'no_terminal_aware', False))
             print(
                 format_table(
@@ -1208,9 +1201,8 @@ def main(argv: Optional[List[str]] = None) -> int:
             if sel == "q":
                 break
             if sel is None:
-                # Quietly handle blank/invalid without extra print, or print once on EOF
-                print(table)
-                break
+                # Stay on current view for blank/invalid input
+                continue
             if isinstance(sel, str) and sel == 'n':
                 # fetch next page
                 args.page += 1
@@ -1281,7 +1273,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 )
                 print(table)
                 return 2
-            # Item-scoped interactive files loop
+            # === Files view loop ===
             while True:
                     # Print only the single colorful files table
                     # Build file list for selection
@@ -1344,6 +1336,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         )
                     )
                     # Then title and files table for the current page
+                    # --- Files view header/table ---
                     render_title("Files", terminal_aware=not getattr(args, 'no_terminal_aware', False))
                     print(
                         format_item_details(
@@ -1439,6 +1432,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         download_dir=args.download_dir,
                     )
                     # Show a details view and action menu
+                    # --- File Info panel ---
                     render_title("File Info", terminal_aware=not getattr(args, 'no_terminal_aware', False))
                     print_file_details(finfo)
                     # Footer-style action hints (bracketed keys)
