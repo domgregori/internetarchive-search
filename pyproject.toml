@@ -1,11 +1,11 @@
 [project]
 name = "ia-search"
 version = "0.1.0"
-description = "CLI to search archive.org and print colored table results"
+description = "CLI to search archive.org and download files"
 readme = "README.md"
 requires-python = ">=3.8"
 authors = [
-  { name = "Your Name" }
+  { name = "DomG" }
 ]
 license = { text = "MIT" }
 
@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://archive.org/"
+Homepage = "https://github.com/domgregori/internetarchive-search"
 
 [project.scripts]
 ia-search = "ia_search:main"
