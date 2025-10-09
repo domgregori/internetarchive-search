@@ -35,6 +35,11 @@ try:
 except Exception:  # pragma: no cover
     requests = None  # fallback to urllib if requests is unavailable
 
+try:
+    import html2text  # type: ignore
+except Exception:  # pragma: no cover
+    html2text = None
+
 import urllib.parse
 import html as _html
 import urllib.request
@@ -657,6 +662,74 @@ def _first(meta: dict, key: str) -> Optional[str]:
     if isinstance(v, str):
         return v
     return None
+
+
+def _extract_description(details: dict) -> Optional[str]:
+    """Extract the raw description string from item metadata."""
+    meta = details.get("metadata") or {}
+    desc = meta.get("description")
+    if isinstance(desc, list):
+        parts = [str(part) for part in desc if part]
+        return "\n\n".join(parts).strip() if parts else None
+    if isinstance(desc, dict):
+        parts = [str(part) for part in desc.values() if part]
+        return "\n\n".join(parts).strip() if parts else None
+    if isinstance(desc, str):
+        return desc.strip()
+    return None
+
+
+def show_description_menu(details: dict, args: argparse.Namespace) -> bool:
+    """Print the description and prompt for back/quit. Returns True if caller should quit."""
+    raw = _extract_description(details)
+    if not raw:
+        print(color("No description available for this item.", Color.YELLOW))
+        try:
+            input(color("Press Enter to return.", Color.BOLD))
+        except EOFError:
+            return True
+        return False
+
+    text = raw
+    if html2text is not None:
+        parser = html2text.HTML2Text()
+        parser.body_width = 0
+        parser.ignore_images = True
+        parser.ignore_links = False
+        parser.single_line_break = True
+        try:
+            converted = parser.handle(raw).strip()
+            if converted:
+                text = converted
+        except Exception as exc:
+            print(color(f"Description conversion failed: {exc}", Color.YELLOW))
+
+    terminal_aware = not getattr(args, "no_terminal_aware", False)
+    width = shutil.get_terminal_size(fallback=(120, 24)).columns if terminal_aware else 80
+    wrapped_lines: List[str] = []
+    for paragraph in text.splitlines():
+        para = paragraph.rstrip()
+        if not para:
+            wrapped_lines.append("")
+            continue
+        if getattr(args, "long_columns", False) or not terminal_aware:
+            wrapped_lines.append(para)
+            continue
+        wrapped_lines.extend(textwrap.wrap(para, width=width) or [""])
+
+    print()
+    render_title("Description", terminal_aware=terminal_aware)
+    for line in wrapped_lines:
+        print(line)
+    print()
+    print(color("( [b]ack  [q]uit )", Color.DIM))
+    try:
+        choice = input(color("Action: ", Color.BOLD)).strip().lower()
+    except EOFError:
+        return True
+    if choice == "q":
+        return True
+    return False
 
 
 def human_size(n: int) -> str:
@@ -1284,7 +1357,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                         )
                     )
                     print()  # spacer above footer
-                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [/] filter  [r]eset  [b]ack  [q]uit  [c]opy page  [o]pen page )"
+                    footer = f"( Page: {files_page}/{total_pages}  [n]ext  [p]rev  [/] filter  [r]eset  [i]nfo  [b]ack  [q]uit  [c]opy page  [o]pen page )"
                     print(color(footer, Color.DIM))
                     try:
                         sys.stdout.flush()
@@ -1334,6 +1407,10 @@ def main(argv: Optional[List[str]] = None) -> int:
                                 print(color("Opened page in browser.", Color.DIM))
                             else:
                                 print(color("Failed to open page URL.", Color.YELLOW))
+                        continue
+                    if raw.lower() == 'i':
+                        if show_description_menu(details, args):
+                            return 0
                         continue
                     if raw.lower() == 'n':
                         files_page = min(total_pages, files_page + 1)
