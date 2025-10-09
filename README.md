@@ -2,20 +2,16 @@
 
 Interactive CLI to search Archive.org for files, browse results, inspect per-item files and hashes, search hash on rg-adguard.net, and download via aria2 (preferred) or PySmartDL.
 
+## Install
+
+- `uv tool install git+https://github.com/domgregori/internetarchive-search`
+
 ## Usage
 
 - After install:
-  - `ia-search -q "Ubuntu 22.04"`
-
-## Install
-
-- `git clone https://github.com/domgregori/internetarchive-search.git`
-- `uv run ia-search.py -q "search term"`
-
-OR
-
-- `python ia-search.py -q "search"` _requires dependencies to be installed_
-  - `pip install .`
+  - `ia-search -q "Search Term"`
+- Without install:
+  - `uvx --from git+https://github.com/domgregori/internetarchive-search ia-search -q "Search Term"`
 
 ### Quick Examples
 
